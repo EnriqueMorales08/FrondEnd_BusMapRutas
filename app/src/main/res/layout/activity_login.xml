@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:clipToOutline="true"
+    android:background="#f9f6f6">
+
+    <!-- Logo de bus -->
+    <ImageView
+        android:layout_width="160dp"
+        android:layout_height="100dp"
+        android:background="@drawable/bus"
+        android:layout_marginTop="25dp"
+        android:layout_marginLeft="200dp" />
+
+    <!-- Etiqueta DNI -->
+    <TextView
+        android:id="@+id/label_dni"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginLeft="50dp"
+        android:layout_marginTop="162dp"
+        android:text="Nombre de usuario:"
+        android:textStyle="bold"
+        android:textColor="#000000"
+        android:textSize="13sp"
+        android:fontFamily="serif" />
+
+    <!-- Campo para ingresar DNI -->
+    <EditText
+        android:id="@+id/editTextDni"
+        android:layout_width="300dp"
+        android:layout_height="40dp"
+        android:layout_marginLeft="50dp"
+        android:layout_marginTop="190dp"
+        android:background="@drawable/retangle"
+        android:hint="Ingresa tu nombre de usuario..."
+        android:inputType="number"
+        android:paddingLeft="10dp"
+        android:backgroundTint="@color/orange"
+        android:maxLength="8" />
+
+    <!-- Etiqueta DNI -->
+    <TextView
+        android:id="@+id/label_password"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginLeft="50dp"
+        android:layout_marginTop="250dp"
+        android:text="Contrasena:"
+        android:textStyle="bold"
+        android:textColor="#000000"
+        android:textSize="13sp"
+        android:fontFamily="serif" />
+
+    <!-- Campo para ingresar DNI -->
+    <EditText
+        android:id="@+id/editPassword"
+        android:layout_width="300dp"
+        android:layout_height="40dp"
+        android:layout_marginLeft="50dp"
+        android:layout_marginTop="275dp"
+        android:background="@drawable/retangle"
+        android:hint="Ingresa tu contrasena..."
+        android:inputType="number"
+        android:paddingLeft="10dp"
+        android:backgroundTint="@color/orange"
+        android:maxLength="8" />
+
+    <!-- Botón Iniciar Sesion -->
+    <Button
+        android:id="@+id/btn_login"
+        android:layout_width="309dp"
+        android:layout_height="50dp"
+        android:layout_marginTop="30dp"
+        android:backgroundTint="@color/orange"
+        android:layout_below="@+id/editPassword"
+        android:layout_marginLeft="50dp"
+        android:text="INICIAR SESION"
+        android:textColor="#000000"/>
+</RelativeLayout>

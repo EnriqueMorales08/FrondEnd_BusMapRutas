@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="colo1_login">#16425B</color>
+    <color name="caja_texto">#4D626F</color>
+    <color name="text_cajatexto">#59FFFFFF</color>
+    <color name="backgroung_button_iniciar">#D9D9D9</color>
+    <color name="text_button_iniciar">#000000</color>
+    <color name="gray">#CCCCCC</color>
+    <color name="orange">#FFC300</color>
+    <color name="underline">#BDB8B8</color>
+</resources>

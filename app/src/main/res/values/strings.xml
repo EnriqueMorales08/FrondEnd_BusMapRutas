@@ -1,0 +1,23 @@
+<resources>
+    <string name="app_name">BusMapPiura</string>
+    <string name="txt_direccion">Direccion de Correo Electronico</string>
+    <string name="txt_contraseña">Contraseña </string>
+    <string name="txt_ingresa_correo">Ingresa tu correo electronico..</string>
+    <string name="txt_ingresa_contraseña">Ingresa tu contraseña..</string>
+    <string name="txt_olvidado">¿Has olvidado la contraseña?</string>
+    <string name="iniciar_ses">Iniciar Sesion</string>
+    <string name="registrarse">Registrarse</string>
+    <string name="galer_a_de_">Galeria de fotos:</string>
+    <string name="ubicaci_n_">Ubicación</string>
+    <string name="rutas">Rutas Transporte Publico Piura</string>
+    <string name="ingresa_lug">Ingresa lugar...</string>
+    <string name="registrarse_usuario">Ingresa tu nombre de usuario...</string>
+    <string name="txt_ingresa_usuario">Ingresa tu nombre de usuario..</string>
+    <string name="registrarse_correo">Ingresa tu correo electronico...</string>
+    <string name="registrarse_contraseña">Ingresa tu contraseña...</string>
+    <string name="registrarse_celular">Ingresa tu numero de celular...</string>
+    <string name="open">Open</string>
+    <string name="close">Close</string>
+    <!-- TODO: Remove or change this placeholder text -->
+    <string name="hello_blank_fragment">Hello blank fragment</string>
+</resources>
