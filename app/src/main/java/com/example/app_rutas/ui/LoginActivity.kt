@@ -29,6 +29,14 @@ class LoginActivity : AppCompatActivity() {
 
         btn_login.setOnClickListener {
             startActivity(Intent(this, MainActivity::class.java))
+
+            val prefs = getSharedPreferences("rutas_prefs", MODE_PRIVATE)
+            prefs.edit().putBoolean("is_logged_in", true).apply()
+
+// Ahora sí lanzas MainActivity
+            startActivity(Intent(this, MainActivity::class.java))
+            finish()
+
             /*
             val dni = editTextDni.text.toString()
 

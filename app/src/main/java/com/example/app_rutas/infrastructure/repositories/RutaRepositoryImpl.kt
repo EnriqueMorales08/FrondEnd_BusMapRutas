@@ -1,18 +1,22 @@
+
 package com.example.app_rutas.infrastructure.repositories
 
 import com.example.app_rutas.domain.repositories.RutaRepository
 import com.example.app_rutas.model.Coordenada
+import com.example.app_rutas.model.Empresa
 import com.example.app_rutas.model.Ruta
+import com.example.app_rutas.model.RutaCompleta
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
+import org.json.JSONObject
 
 class RutaRepositoryImpl : RutaRepository {
 
     private val client = OkHttpClient()
-    private val backendUrl = "http://192.168.101.14:8080/api/rutas"  // Ajusta IP si cambia
+    private val backendUrl = "http://192.168.101.14:8080/api/rutas"
 
     override suspend fun obtenerCoordenadasDeRuta(rutaId: Long): List<Coordenada> = withContext(Dispatchers.IO) {
         val url = "$backendUrl/$rutaId/coordenadas"
@@ -36,10 +40,24 @@ class RutaRepositoryImpl : RutaRepository {
         }
     }
 
+    suspend fun obtenerRutasCompletas(): List<RutaCompleta> {
+        val rutasBasicas = obtenerRutas()
+        return rutasBasicas.map { ruta ->
+            val coordenadas = obtenerCoordenadasDeRuta(ruta.id)
+            val paraderoRepo = ParaderoRepositoryImpl()
+            val paraderos = paraderoRepo.obtenerTodosLosParaderosDeRuta(ruta.id)
+            RutaCompleta(
+                id = ruta.id,
+                nombre = ruta.nombre,
+                empresa = ruta.empresa,
+                coordenadas = coordenadas,
+                paraderos = paraderos
+            )
+        }
+    }
 
     override suspend fun obtenerRutas(): List<Ruta> = withContext(Dispatchers.IO) {
-        val url = "$backendUrl"
-        val request = Request.Builder().url(url).build()
+        val request = Request.Builder().url(backendUrl).build()
 
         try {
             val response = client.newCall(request).execute()
@@ -51,12 +69,18 @@ class RutaRepositoryImpl : RutaRepository {
                 val obj = jsonArray.getJSONObject(i)
                 val id = obj.getLong("id")
                 val nombre = obj.getString("nombre")
-                lista.add(Ruta(id, nombre))
+
+                val empresaJson: JSONObject = obj.getJSONObject("empresa")
+                val empresa = Empresa(
+                    id = empresaJson.getLong("id"),
+                    nombre = empresaJson.getString("nombre")
+                )
+
+                lista.add(Ruta(id, nombre, empresa))
             }
             lista
         } catch (e: Exception) {
             emptyList()
         }
     }
-
 }

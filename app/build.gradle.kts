@@ -40,10 +40,18 @@ android {
 dependencies {
 
 
-    implementation (libs.play.services.maps.v1810)
-    implementation (libs.okhttp)
+    implementation(libs.play.services.maps.v1810)
+    implementation(libs.okhttp)
+    implementation(libs.material.v1110)
+    implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.org.json)
+    implementation(libs.google.android.maps.utils)
+    implementation(libs.retrofit)
+    implementation(libs.places)
 
-    implementation (libs.retrofit)
+    //implementation ("com.google.android.gms:play-services-tasks:18.0.2")
+
     implementation (libs.converter.gson)
     implementation (libs.logging.interceptor)
     implementation(libs.firebase.auth.ktx)

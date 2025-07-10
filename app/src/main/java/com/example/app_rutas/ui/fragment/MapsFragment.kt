@@ -1,3 +1,4 @@
+// Versión completa con Snap to Roads para ajustar la ruta a las calles reales
 package com.example.app_rutas.ui.fragment
 
 import android.Manifest
@@ -11,12 +12,14 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
 import android.widget.AutoCompleteTextView
+import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.ActivityCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import com.example.app_rutas.R
 import com.example.app_rutas.domain.usecases.ObtenerParaderoCercanoUseCase
+import com.example.app_rutas.infrastructure.repositories.InformacionRepositoryImpl
 import com.example.app_rutas.infrastructure.repositories.ParaderoRepositoryImpl
 import com.example.app_rutas.model.Coordenada
 import com.example.app_rutas.model.Paradero
@@ -25,6 +28,7 @@ import com.example.app_rutas.ui.viewmodel.*
 import com.google.android.gms.location.*
 import com.google.android.gms.maps.*
 import com.google.android.gms.maps.model.*
+import com.google.android.material.bottomsheet.BottomSheetBehavior
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -44,11 +48,17 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
     private var ultimaRutaHastaParadero: Polyline? = null
     private var paraderoActual: Paradero? = null
     private lateinit var locationCallback: LocationCallback
+    private lateinit var bottomSheetBehavior: BottomSheetBehavior<View>
+    private lateinit var bottomSheetView: View
 
     private val apiKey = "AIzaSyAFpBlDKWCOpGY7MliuGGd8pCThUjXLkbA"
 
     private val paraderoViewModel: ParaderoViewModel by viewModels {
         ParaderoViewModelFactory(ObtenerParaderoCercanoUseCase(ParaderoRepositoryImpl()))
+    }
+
+    private val informacionViewModel: InformacionViewModel by viewModels {
+        InformacionViewModelFactory(InformacionRepositoryImpl())
     }
 
     private val rutaViewModel: RutaViewModel by viewModels {
@@ -61,6 +71,10 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
         inflater.inflate(R.layout.fragment_maps, container, false)
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        bottomSheetView = view.findViewById(R.id.bottomSheetInformacion)
+        bottomSheetBehavior = BottomSheetBehavior.from(bottomSheetView)
+        bottomSheetBehavior.state = BottomSheetBehavior.STATE_HIDDEN
+
         btnParaderoCercano = view.findViewById(R.id.btnParaderoCercano)
         dropdownRutas = view.findViewById(R.id.auto)
 
@@ -75,11 +89,25 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
         }
 
         rutaViewModel.coordenadasRuta.observe(viewLifecycleOwner) { coordenadas ->
-            trazarRutaConCalles(coordenadas)
+            snapToRoadsYMostrarRuta(coordenadas)
         }
 
         rutasDisponiblesViewModel.rutasDisponibles.observe(viewLifecycleOwner) { rutas ->
             configurarDropdown(rutas)
+        }
+
+        informacionViewModel.informacion.observe(viewLifecycleOwner) { informacion ->
+            informacion?.let {
+                view.findViewById<TextView>(R.id.txtUnidades).text = it.numeroUnidades.toString()
+                view.findViewById<TextView>(R.id.txtDuracion).text = it.duracionRecorrido
+                view.findViewById<TextView>(R.id.txtLongitud).text = "${it.longitudRecorrido} km"
+                view.findViewById<TextView>(R.id.txtInicioServicio).text =
+                    "Lunes a Viernes: ${it.inicioServicioLunesViernes}\nSábado: ${it.inicioServicioSabado}\nDomingo: ${it.inicioServicioDomingo}"
+                view.findViewById<TextView>(R.id.txtFinServicio).text =
+                    "Lunes a Viernes: ${it.finServicioLunesViernes}\nSábado: ${it.finServicioSabado}\nDomingo: ${it.finServicioDomingo}"
+                view.findViewById<TextView>(R.id.txtMensaje).text = it.mensaje
+                bottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
+            }
         }
 
         rutasDisponiblesViewModel.obtenerRutas()
@@ -125,20 +153,16 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
     override fun onMapReady(map: GoogleMap) {
         googleMap = map
         googleMap.clear()
-
-        // Coordenadas de Piura, Perú
         val piuraLatLng = LatLng(-5.19449, -80.63282)
-
-        // Mover la cámara al iniciar
-        googleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(piuraLatLng, 14f)) // Zoom 14 = ciudad
+        googleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(piuraLatLng, 14f))
     }
 
-    private fun getScaledMarkerIcon(resourceId: Int, width: Int = 100, height: Int = 100): BitmapDescriptor {
-        val bitmap = BitmapFactory.decodeResource(resources, resourceId)
+    private fun getScaledMarkerIcon(resourceId: Int, width: Int = 100, height: Int = 100): BitmapDescriptor? {
+        val res = context?.resources ?: return null
+        val bitmap = BitmapFactory.decodeResource(res, resourceId)
         val scaledBitmap = Bitmap.createScaledBitmap(bitmap, width, height, false)
         return BitmapDescriptorFactory.fromBitmap(scaledBitmap)
     }
-
 
     private fun obtenerUbicacion() {
         if (rutaSeleccionadaActual == null) {
@@ -167,7 +191,6 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
                     .position(latLng)
                     .title("Paradero más cercano")
                     .icon(getScaledMarkerIcon(R.drawable.ic_paradero, 80, 80))
-
             )
             googleMap.animateCamera(CameraUpdateFactory.newLatLngZoom(latLng, 17f))
             paraderoActual = it
@@ -175,13 +198,14 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
     }
 
     private fun configurarDropdown(rutas: List<Ruta>) {
-        val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, rutas.map { it.nombre })
+        val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, rutas)
         dropdownRutas.setAdapter(adapter)
 
         dropdownRutas.setOnItemClickListener { _, _, position, _ ->
             val rutaSeleccionada = rutas[position]
-            rutaSeleccionadaActual = rutaSeleccionada
+            bottomSheetBehavior.state = BottomSheetBehavior.STATE_HIDDEN
 
+            rutaSeleccionadaActual = rutaSeleccionada
             googleMap.clear()
             marcadorParadero = null
             marcadorUsuario = null
@@ -189,25 +213,44 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
             ultimaRutaHastaParadero = null
             paraderoActual = null
 
-
             rutaViewModel.obtenerRuta(rutaSeleccionada.id)
+            informacionViewModel.obtenerInformacion(rutaSeleccionada.empresa.id)
         }
     }
 
     private fun actualizarUbicacionEnMapa(location: Location) {
+        if (!isAdded || context == null || view == null) return
+
         val latLng = LatLng(location.latitude, location.longitude)
         marcadorUsuario?.remove()
-        marcadorUsuario = googleMap.addMarker(
-            MarkerOptions()
-                .position(latLng)
-                .title("Tu ubicación")
-                .icon(getScaledMarkerIcon(R.drawable.ic_persona, 80, 80))
 
-        )
+        val icon = getScaledMarkerIcon(R.drawable.ic_persona, 80, 80)
+        if (icon != null) {
+            marcadorUsuario = googleMap.addMarker(
+                MarkerOptions()
+                    .position(latLng)
+                    .title("Tu ubicación")
+                    .icon(icon)
+            )
+        }
     }
 
     private fun trazarRutaHastaParadero(origen: LatLng, destino: LatLng) {
-        val url = "https://maps.googleapis.com/maps/api/directions/json?origin=${origen.latitude},${origen.longitude}&destination=${destino.latitude},${destino.longitude}&key=$apiKey"
+        val polylineOptions = PolylineOptions()
+            .add(origen)
+            .add(destino)
+            .color(android.graphics.Color.RED)
+            .width(8f)
+
+        ultimaRutaHastaParadero?.remove()
+        ultimaRutaHastaParadero = googleMap.addPolyline(polylineOptions)
+    }
+
+    private fun snapToRoadsYMostrarRuta(coordenadas: List<Coordenada>) {
+        if (coordenadas.isEmpty()) return
+
+        val path = coordenadas.joinToString("|") { "${it.latitud},${it.longitud}" }
+        val url = "https://roads.googleapis.com/v1/snapToRoads?path=$path&interpolate=true&key=$apiKey"
 
         CoroutineScope(Dispatchers.IO).launch {
             try {
@@ -215,101 +258,34 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
                 val request = Request.Builder().url(url).build()
                 val response = client.newCall(request).execute()
 
-                response.body?.string()?.let { responseData ->
-                    val json = JSONObject(responseData)
-                    val routes = json.getJSONArray("routes")
-                    if (routes.length() > 0) {
-                        val polyline = routes.getJSONObject(0).getJSONObject("overview_polyline").getString("points")
-                        val path = decodePolyline(polyline)
+                val responseData = response.body?.string()
+                if (!response.isSuccessful || responseData.isNullOrEmpty()) return@launch
 
-                        launch(Dispatchers.Main) {
-                            ultimaRutaHastaParadero?.remove()
-                            val polylineOptions = PolylineOptions()
-                                .color(android.graphics.Color.RED)
-                                .width(8f)
-                            path.forEach { polylineOptions.add(it) }
-                            ultimaRutaHastaParadero = googleMap.addPolyline(polylineOptions)
-                        }
-                    }
+                val json = JSONObject(responseData)
+                val snappedPoints = json.getJSONArray("snappedPoints")
+
+                val snappedLatLngs = mutableListOf<LatLng>()
+                for (i in 0 until snappedPoints.length()) {
+                    val location = snappedPoints.getJSONObject(i).getJSONObject("location")
+                    val lat = location.getDouble("latitude")
+                    val lng = location.getDouble("longitude")
+                    snappedLatLngs.add(LatLng(lat, lng))
+                }
+
+                launch(Dispatchers.Main) {
+                    val polylineOptions = PolylineOptions()
+                        .addAll(snappedLatLngs)
+                        .color(android.graphics.Color.BLUE)
+                        .width(10f)
+                    googleMap.addPolyline(polylineOptions)
+
+                    val bounds = LatLngBounds.builder()
+                    snappedLatLngs.forEach { bounds.include(it) }
+                    googleMap.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds.build(), 100))
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
         }
-    }
-
-    private fun trazarRutaConCalles(coordenadas: List<Coordenada>) {
-        if (coordenadas.size < 2) return
-
-        val origen = coordenadas.first()
-        val destino = coordenadas.last()
-        val waypoints = coordenadas.drop(1).dropLast(1).joinToString("|") { "${it.latitud},${it.longitud}" }
-
-        val url = "https://maps.googleapis.com/maps/api/directions/json?origin=${origen.latitud},${origen.longitud}&destination=${destino.latitud},${destino.longitud}&waypoints=$waypoints&key=$apiKey"
-
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val client = OkHttpClient()
-                val request = Request.Builder().url(url).build()
-                val response = client.newCall(request).execute()
-
-                response.body?.string()?.let { responseData ->
-                    val json = JSONObject(responseData)
-                    val routes = json.getJSONArray("routes")
-                    if (routes.length() > 0) {
-                        val polyline = routes.getJSONObject(0).getJSONObject("overview_polyline").getString("points")
-                        val path = decodePolyline(polyline)
-
-                        launch(Dispatchers.Main) {
-                            val polylineOptions = PolylineOptions().color(android.graphics.Color.BLUE).width(10f)
-                            path.forEach { polylineOptions.add(it) }
-                            googleMap.addPolyline(polylineOptions)
-
-                            val boundsBuilder = LatLngBounds.builder()
-                            path.forEach { boundsBuilder.include(it) }
-                            googleMap.animateCamera(CameraUpdateFactory.newLatLngBounds(boundsBuilder.build(), 100))
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-    }
-
-    private fun decodePolyline(encoded: String): List<LatLng> {
-        val poly = mutableListOf<LatLng>()
-        var index = 0
-        val len = encoded.length
-        var lat = 0
-        var lng = 0
-
-        while (index < len) {
-            var b: Int
-            var shift = 0
-            var result = 0
-            do {
-                b = encoded[index++].code - 63
-                result = result or (b and 0x1f shl shift)
-                shift += 5
-            } while (b >= 0x20)
-            val dlat = if ((result and 1) != 0) (result shr 1).inv() else (result shr 1)
-            lat += dlat
-
-            shift = 0
-            result = 0
-            do {
-                b = encoded[index++].code - 63
-                result = result or (b and 0x1f shl shift)
-                shift += 5
-            } while (b >= 0x20)
-            val dlng = if ((result and 1) != 0) (result shr 1).inv() else (result shr 1)
-            lng += dlng
-
-            val latLng = LatLng(lat / 1E5, lng / 1E5)
-            poly.add(latLng)
-        }
-
-        return poly
     }
 }
