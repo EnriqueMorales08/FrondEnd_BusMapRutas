@@ -70,11 +70,12 @@ class RegisterActivity : AppCompatActivity() {
         btnRegistrar.setOnClickListener { validarYRegistrar() }
 
         lifecycleScope.launch {
-            viewModel.registroExitoso.collect { resultado ->
-                if (resultado == true) {
-                    mostrarMensaje("Registro exitoso")
+            viewModel.registroExitoso.collect { usuario ->
+                if (usuario != null) {
+                    mostrarMensaje("Registro exitoso: ${usuario.nombre}")
+                    progressBar.visibility = View.GONE
                     irALogin()
-                } else if (resultado == false) {
+                } else {
                     mostrarMensaje("Error al registrar usuario")
                     progressBar.visibility = View.GONE
                 }
@@ -162,15 +163,19 @@ class RegisterActivity : AppCompatActivity() {
 
     private fun registrarConFotos(nombre: String, correo: String, celular: String, password: String, dni: String) {
         val usuario = UsuarioRequest(
+            dni = dni,
             nombre = nombre,
             correo = correo,
             celular = celular,
-            password = password,
-            fotoPerfil = imagenUri.toString(), // También podrías dejarla vacía y subir desde ViewModel
-            dni = dni
+            password = password
         )
-
-        viewModel.registrarUsuario(usuario, imagenUri!!, uriDniFrente!!, uriDniReverso!!)
+        viewModel.registrarUsuario(
+            usuario,
+            imagenUri!!,
+            uriDniFrente!!,
+            uriDniReverso!!,
+            contentResolver
+        )
     }
 
     private fun mostrarMensaje(mensaje: String) {
