@@ -1,13 +1,14 @@
 {
   "project_info": {
-    "project_number": "233889065280",
-    "project_id": "apprutas-904f4",
-    "storage_bucket": "apprutas-904f4.firebasestorage.app"
+    "project_number": "13287854821",
+    "firebase_url": "https://rutas202555-default-rtdb.firebaseio.com",
+    "project_id": "rutas202555",
+    "storage_bucket": "rutas202555.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:233889065280:android:c9bb7dd206d5890be9b2a5",
+        "mobilesdk_app_id": "1:13287854821:android:393867ac96a79ae43e3a0c",
         "android_client_info": {
           "package_name": "com.example.app_rutas"
         }
@@ -15,7 +16,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyCrOqFgLRx5sxt8RuJ0DmcXcIu96NQ3qpA"
+          "current_key": "AIzaSyBGOsgiYtlxQTE9E1NxQSgZqYcZO2hfRjI"
         }
       ],
       "services": {

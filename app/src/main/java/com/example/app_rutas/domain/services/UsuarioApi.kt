@@ -19,6 +19,7 @@ interface UsuarioApi {
         @Part("celular") celular: RequestBody,
         @Part("password") password: RequestBody,
         @Part("dni") dni: RequestBody,
+        @Part("estado") estado: RequestBody,
         @Part fotoPerfil: MultipartBody.Part,
         @Part dniFrontal: MultipartBody.Part,
         @Part dniPosterior: MultipartBody.Part

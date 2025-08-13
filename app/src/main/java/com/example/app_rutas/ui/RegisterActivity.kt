@@ -1,9 +1,8 @@
 package com.example.app_rutas.ui
 
-
 import android.app.Activity
 import android.content.Intent
-import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
 import android.provider.MediaStore
@@ -13,8 +12,14 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import com.example.app_rutas.R
-import com.example.app_rutas.domain.entities.UsuarioRequest
 import kotlinx.coroutines.launch
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.File
+import java.io.FileOutputStream
 import java.util.regex.Pattern
 
 class RegisterActivity : AppCompatActivity() {
@@ -67,16 +72,19 @@ class RegisterActivity : AppCompatActivity() {
         btnSeleccionarFoto.setOnClickListener { seleccionarImagen(PICK_FOTO_PERFIL) }
         btnSeleccionarDniFrente.setOnClickListener { seleccionarImagen(PICK_DNI_FRENTE) }
         btnSeleccionarDniReverso.setOnClickListener { seleccionarImagen(PICK_DNI_REVERSO) }
+
         btnRegistrar.setOnClickListener { validarYRegistrar() }
 
         lifecycleScope.launch {
-            viewModel.registroExitoso.collect { resultado ->
-                if (resultado == true) {
-                    mostrarMensaje("Registro exitoso")
-                    irALogin()
-                } else if (resultado == false) {
-                    mostrarMensaje("Error al registrar usuario")
+            viewModel.registroExitoso.collect { exitoso ->
+                if (exitoso != null) {
                     progressBar.visibility = View.GONE
+                    if (exitoso) {
+                        mostrarMensaje("Registro exitoso")
+                        irALogin()
+                    } else {
+                        mostrarMensaje("Error al registrar usuario")
+                    }
                 }
             }
         }
@@ -89,10 +97,9 @@ class RegisterActivity : AppCompatActivity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-
         if (resultCode == Activity.RESULT_OK && data != null) {
-            val uri = data.data
-            val bitmap: Bitmap = MediaStore.Images.Media.getBitmap(this.contentResolver, uri)
+            val uri = data.data ?: return
+            val bitmap = MediaStore.Images.Media.getBitmap(contentResolver, uri)
 
             when (requestCode) {
                 PICK_FOTO_PERFIL -> {
@@ -112,65 +119,76 @@ class RegisterActivity : AppCompatActivity() {
     }
 
     private fun validarYRegistrar() {
-        val usuario = etUsuario.text.toString().trim()
+        val nombre = etUsuario.text.toString().trim()
         val correo = etCorreo.text.toString().trim()
         val password = etPassword.text.toString()
         val confirmarPassword = etConfirmarPassword.text.toString()
         val celular = etCelular.text.toString().trim()
         val dni = etDni.text.toString().trim()
 
-        if (usuario.isEmpty() || correo.isEmpty() || password.isEmpty() || confirmarPassword.isEmpty()
-            || celular.isEmpty() || dni.isEmpty()
+        if (nombre.isEmpty() || correo.isEmpty() || password.isEmpty() ||
+            confirmarPassword.isEmpty() || celular.isEmpty() || dni.isEmpty()
         ) {
-            mostrarMensaje("Por favor completa todos los campos")
+            mostrarMensaje("Completa todos los campos")
             return
         }
 
         if (!android.util.Patterns.EMAIL_ADDRESS.matcher(correo).matches()) {
-            mostrarMensaje("Correo electrónico no válido")
+            mostrarMensaje("Correo inválido")
             return
         }
 
         if (!Pattern.matches("^9[0-9]{8}$", celular)) {
-            mostrarMensaje("Número de celular inválido (ej: 9XXXXXXXX)")
+            mostrarMensaje("Celular inválido (ej: 9XXXXXXXX)")
             return
         }
 
-        if (password.length < 6) {
-            mostrarMensaje("La contraseña debe tener al menos 6 caracteres")
+        if (password.length < 6 || password != confirmarPassword) {
+            mostrarMensaje("Las contraseñas no coinciden o son cortas")
             return
         }
 
-        if (password != confirmarPassword) {
-            mostrarMensaje("Las contraseñas no coinciden")
-            return
-        }
-
-        if (imagenUri == null) {
-            mostrarMensaje("Selecciona una foto de perfil")
-            return
-        }
-
-        if (uriDniFrente == null || uriDniReverso == null) {
-            mostrarMensaje("Selecciona las fotos del DNI (frontal y reverso)")
+        if (imagenUri == null || uriDniFrente == null || uriDniReverso == null) {
+            mostrarMensaje("Selecciona todas las imágenes")
             return
         }
 
         progressBar.visibility = View.VISIBLE
-        registrarConFotos(usuario, correo, celular, password, dni)
+
+        val nombrePart = nombre.toRequestBody("text/plain".toMediaTypeOrNull())
+        val correoPart = correo.toRequestBody("text/plain".toMediaTypeOrNull())
+        val celularPart = celular.toRequestBody("text/plain".toMediaTypeOrNull())
+        val passwordPart = password.toRequestBody("text/plain".toMediaTypeOrNull())
+        val dniPart = dni.toRequestBody("text/plain".toMediaTypeOrNull())
+        val estadoPart = "false".toRequestBody("text/plain".toMediaTypeOrNull())
+
+        val fotoPerfilPart = crearPartDeUri(imagenUri!!, "fotoPerfil")
+        val dniFrontalPart = crearPartDeUri(uriDniFrente!!, "dniFrontal")
+        val dniPosteriorPart = crearPartDeUri(uriDniReverso!!, "dniPosterior")
+
+        viewModel.registrarUsuario(
+            nombrePart,
+            correoPart,
+            celularPart,
+            passwordPart,
+            dniPart,
+            estadoPart,
+            fotoPerfilPart,
+            dniFrontalPart,
+            dniPosteriorPart
+        )
     }
 
-    private fun registrarConFotos(nombre: String, correo: String, celular: String, password: String, dni: String) {
-        val usuario = UsuarioRequest(
-            nombre = nombre,
-            correo = correo,
-            celular = celular,
-            password = password,
-            fotoPerfil = imagenUri.toString(), // También podrías dejarla vacía y subir desde ViewModel
-            dni = dni
-        )
+    private fun crearPartDeUri(uri: Uri, nombreCampo: String): MultipartBody.Part {
+        val inputStream = contentResolver.openInputStream(uri)!!
+        val archivo = File.createTempFile(nombreCampo, ".jpg", cacheDir)
+        val outputStream = FileOutputStream(archivo)
+        inputStream.copyTo(outputStream)
+        inputStream.close()
+        outputStream.close()
 
-        viewModel.registrarUsuario(usuario, imagenUri!!, uriDniFrente!!, uriDniReverso!!)
+        val requestFile = archivo.asRequestBody("image/jpeg".toMediaTypeOrNull())
+        return MultipartBody.Part.createFormData(nombreCampo, archivo.name, requestFile)
     }
 
     private fun mostrarMensaje(mensaje: String) {
@@ -178,8 +196,7 @@ class RegisterActivity : AppCompatActivity() {
     }
 
     private fun irALogin() {
-        val intent = Intent(this, LoginActivity::class.java)
-        startActivity(intent)
+        startActivity(Intent(this, LoginActivity::class.java))
         finish()
     }
 }

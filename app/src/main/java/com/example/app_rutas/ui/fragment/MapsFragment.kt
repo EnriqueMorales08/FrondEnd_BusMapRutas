@@ -1,7 +1,7 @@
-// Versión completa con Snap to Roads para ajustar la ruta a las calles reales
 package com.example.app_rutas.ui.fragment
 
 import android.Manifest
+import android.animation.ValueAnimator
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.LinearInterpolator
 import android.widget.ArrayAdapter
 import android.widget.AutoCompleteTextView
 import android.widget.TextView
@@ -22,6 +23,7 @@ import com.example.app_rutas.domain.usecases.ObtenerParaderoCercanoUseCase
 import com.example.app_rutas.infrastructure.repositories.InformacionRepositoryImpl
 import com.example.app_rutas.infrastructure.repositories.ParaderoRepositoryImpl
 import com.example.app_rutas.model.Coordenada
+import com.example.app_rutas.model.Empresa
 import com.example.app_rutas.model.Paradero
 import com.example.app_rutas.model.Ruta
 import com.example.app_rutas.ui.viewmodel.*
@@ -35,8 +37,14 @@ import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
 
 class MapsFragment : Fragment(), OnMapReadyCallback {
+
+    // ===== Configura aquí el/los IDs de empresas que SÍ tienen GPS =====
+    private val empresas_con_gps = setOf(1L)
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var googleMap: GoogleMap
@@ -53,18 +61,22 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
 
     private val apiKey = "AIzaSyAFpBlDKWCOpGY7MliuGGd8pCThUjXLkbA"
 
+    // --- Bus en tiempo real (Firebase vía ViewModel) ---
+    private val busViewModel: BusViewModel by viewModels {
+        BusViewModelFactory("ubicacion") // nodo actual de tu Firebase
+    }
+    private var marcadorBusSuperStar: Marker? = null
+    private var ultimaPosBus: LatLng? = null
+    private var busAnimator: ValueAnimator? = null
+    private val BUS_ANIM_DURATION = 9_500L // animación suave entre updates de ~10s
+
     private val paraderoViewModel: ParaderoViewModel by viewModels {
         ParaderoViewModelFactory(ObtenerParaderoCercanoUseCase(ParaderoRepositoryImpl()))
     }
-
     private val informacionViewModel: InformacionViewModel by viewModels {
         InformacionViewModelFactory(InformacionRepositoryImpl())
     }
-
-    private val rutaViewModel: RutaViewModel by viewModels {
-        RutaViewModelFactory()
-    }
-
+    private val rutaViewModel: RutaViewModel by viewModels { RutaViewModelFactory() }
     private val rutasDisponiblesViewModel: RutasDisponiblesViewModel by viewModels()
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View =
@@ -84,17 +96,9 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
 
         btnParaderoCercano.setOnClickListener { obtenerUbicacion() }
 
-        paraderoViewModel.paraderoCercano.observe(viewLifecycleOwner) {
-            mostrarParaderoEnMapa(it)
-        }
-
-        rutaViewModel.coordenadasRuta.observe(viewLifecycleOwner) { coordenadas ->
-            snapToRoadsYMostrarRuta(coordenadas)
-        }
-
-        rutasDisponiblesViewModel.rutasDisponibles.observe(viewLifecycleOwner) { rutas ->
-            configurarDropdown(rutas)
-        }
+        paraderoViewModel.paraderoCercano.observe(viewLifecycleOwner) { mostrarParaderoEnMapa(it) }
+        rutaViewModel.coordenadasRuta.observe(viewLifecycleOwner) { snapToRoadsYMostrarRuta(it) }
+        rutasDisponiblesViewModel.rutasDisponibles.observe(viewLifecycleOwner) { configurarDropdown(it) }
 
         informacionViewModel.informacion.observe(viewLifecycleOwner) { informacion ->
             informacion?.let {
@@ -112,6 +116,7 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
 
         rutasDisponiblesViewModel.obtenerRutas()
 
+        // Ubicación del usuario (tu lógica original)
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 val location = result.lastLocation ?: return
@@ -124,10 +129,8 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
                     val distancia = FloatArray(1)
                     Location.distanceBetween(
                         origen.latitude, origen.longitude,
-                        destino.latitude, destino.longitude,
-                        distancia
+                        destino.latitude, destino.longitude, distancia
                     )
-
                     if (distancia[0] > 20) {
                         trazarRutaHastaParadero(origen, destino)
                     } else {
@@ -147,6 +150,33 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
                 locationCallback,
                 requireActivity().mainLooper
             )
+        }
+
+        // Observa la posición del bus
+        busViewModel.posicion.observe(viewLifecycleOwner) { pos ->
+            val lat = pos?.latitud ?: return@observe
+            val lng = pos.longitud ?: return@observe
+            val vel = pos.velocidad
+            val nuevaPos = LatLng(lat, lng)
+
+            if (marcadorBusSuperStar == null) {
+                val icon = getScaledMarkerIcon(R.drawable.ic_bus, 90, 90) // tu drawable bus.jpeg
+                marcadorBusSuperStar = googleMap.addMarker(
+                    MarkerOptions()
+                        .position(nuevaPos)
+                        .title("Bus SUPER STAR")
+                        .snippet(if (vel != null) "Vel: $vel km/h" else null)
+                        .icon(icon)
+                        .anchor(0.5f, 0.5f)
+                        .flat(true)
+                )
+                googleMap.animateCamera(CameraUpdateFactory.newLatLngZoom(nuevaPos, 16f))
+                ultimaPosBus = nuevaPos
+            } else {
+                val desde = ultimaPosBus ?: nuevaPos
+                animateBusMarker(desde, nuevaPos, BUS_ANIM_DURATION, vel)
+                ultimaPosBus = nuevaPos
+            }
         }
     }
 
@@ -169,12 +199,10 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
             Toast.makeText(requireContext(), "Primero selecciona una ruta", Toast.LENGTH_SHORT).show()
             return
         }
-
         if (ActivityCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(requireActivity(), arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 1)
             return
         }
-
         fusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
             location?.let {
                 paraderoViewModel.obtenerParaderoMasCercano(it.latitude, it.longitude, rutaSeleccionadaActual!!.id)
@@ -197,6 +225,13 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
         }
     }
 
+    // ---- clave: decidir por empresa real, no por el texto del combo ----
+    private fun empresaTieneGPS(empresa: Empresa): Boolean {
+        if (empresas_con_gps.contains(empresa.id)) return true
+        val normalized = empresa.nombre.replace("\\s|-|_".toRegex(), "").lowercase()
+        return normalized.contains("superstar") || normalized.contains("superestar")
+    }
+
     private fun configurarDropdown(rutas: List<Ruta>) {
         val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, rutas)
         dropdownRutas.setAdapter(adapter)
@@ -215,15 +250,28 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
 
             rutaViewModel.obtenerRuta(rutaSeleccionada.id)
             informacionViewModel.obtenerInformacion(rutaSeleccionada.empresa.id)
+
+            // Encender/apagar seguimiento de bus según la EMPRESA (no según el texto mostrado)
+            marcadorBusSuperStar?.remove()
+            marcadorBusSuperStar = null
+            ultimaPosBus = null
+            busAnimator?.cancel()
+            busAnimator = null
+
+            if (empresaTieneGPS(rutaSeleccionada.empresa)) {
+                busViewModel.start(path = "ubicacion") { msg ->
+                    Toast.makeText(requireContext(), "Firebase: $msg", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                busViewModel.stop()
+            }
         }
     }
 
     private fun actualizarUbicacionEnMapa(location: Location) {
         if (!isAdded || context == null || view == null) return
-
         val latLng = LatLng(location.latitude, location.longitude)
         marcadorUsuario?.remove()
-
         val icon = getScaledMarkerIcon(R.drawable.ic_persona, 80, 80)
         if (icon != null) {
             marcadorUsuario = googleMap.addMarker(
@@ -241,14 +289,12 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
             .add(destino)
             .color(android.graphics.Color.RED)
             .width(8f)
-
         ultimaRutaHastaParadero?.remove()
         ultimaRutaHastaParadero = googleMap.addPolyline(polylineOptions)
     }
 
     private fun snapToRoadsYMostrarRuta(coordenadas: List<Coordenada>) {
         if (coordenadas.isEmpty()) return
-
         val path = coordenadas.joinToString("|") { "${it.latitud},${it.longitud}" }
         val url = "https://roads.googleapis.com/v1/snapToRoads?path=$path&interpolate=true&key=$apiKey"
 
@@ -257,7 +303,6 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
                 val client = OkHttpClient()
                 val request = Request.Builder().url(url).build()
                 val response = client.newCall(request).execute()
-
                 val responseData = response.body?.string()
                 if (!response.isSuccessful || responseData.isNullOrEmpty()) return@launch
 
@@ -287,5 +332,55 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
                 e.printStackTrace()
             }
         }
+    }
+
+    // ---------- Animación del marcador de bus ----------
+    private fun bearing(from: LatLng, to: LatLng): Float {
+        val lat1 = Math.toRadians(from.latitude)
+        val lat2 = Math.toRadians(to.latitude)
+        val dLon = Math.toRadians(to.longitude - from.longitude)
+        val y = sin(dLon) * cos(lat2)
+        val x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon)
+        var brng = Math.toDegrees(atan2(y, x))
+        brng = (brng + 360) % 360
+        return brng.toFloat()
+    }
+
+    private fun animateBusMarker(from: LatLng, to: LatLng, durationMs: Long = BUS_ANIM_DURATION, velocidad: Double? = null) {
+        busAnimator?.cancel()
+        marcadorBusSuperStar?.let { marker ->
+            marker.isFlat = true
+            marker.rotation = bearing(from, to)
+        }
+        val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = durationMs
+            interpolator = LinearInterpolator()
+            addUpdateListener { va ->
+                val t = va.animatedFraction
+                val lat = from.latitude + (to.latitude - from.latitude) * t
+                val lng = from.longitude + (to.longitude - from.longitude) * t
+                marcadorBusSuperStar?.position = LatLng(lat, lng)
+            }
+            addListener(object : android.animation.Animator.AnimatorListener {
+                override fun onAnimationStart(animation: android.animation.Animator) {}
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    if (velocidad != null) marcadorBusSuperStar?.snippet = "Vel: $velocidad km/h"
+                }
+                override fun onAnimationCancel(animation: android.animation.Animator) {}
+                override fun onAnimationRepeat(animation: android.animation.Animator) {}
+            })
+        }
+        busAnimator = animator
+        animator.start()
+    }
+    // ---------------------------------------------------
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        busAnimator?.cancel()
+        busAnimator = null
+        busViewModel.stop()
+        marcadorBusSuperStar = null
+        ultimaPosBus = null
     }
 }
