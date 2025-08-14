@@ -70,14 +70,15 @@ class RegisterActivity : AppCompatActivity() {
         btnRegistrar.setOnClickListener { validarYRegistrar() }
 
         lifecycleScope.launch {
-            viewModel.registroExitoso.collect { usuario ->
-                if (usuario != null) {
-                    mostrarMensaje("Registro exitoso: ${usuario.nombre}")
-                    progressBar.visibility = View.GONE
-                    irALogin()
-                } else {
-                    mostrarMensaje("Error al registrar usuario")
-                    progressBar.visibility = View.GONE
+            viewModel.resultado.collect { result ->
+                progressBar.visibility = View.GONE
+                if (result != null) {
+                    result.onSuccess {
+                        mostrarMensaje("Registro exitoso: ${it.nombre}")
+                        irALogin()
+                    }.onFailure {
+                        mostrarMensaje("Error: ${it.message}")
+                    }
                 }
             }
         }
@@ -169,12 +170,16 @@ class RegisterActivity : AppCompatActivity() {
             celular = celular,
             password = password
         )
-        viewModel.registrarUsuario(
-            usuario,
-            imagenUri!!,
-            uriDniFrente!!,
-            uriDniReverso!!,
-            contentResolver
+        viewModel.registrar(
+            dni = usuario.dni,
+            nombre = usuario.nombre,
+            correo = usuario.correo,
+            celular = usuario.celular,
+            password = usuario.password,
+            fotoPerfil = imagenUri!!,
+            dniFrontal = uriDniFrente!!,
+            dniPosterior = uriDniReverso!!,
+            contentResolver = contentResolver
         )
     }
 

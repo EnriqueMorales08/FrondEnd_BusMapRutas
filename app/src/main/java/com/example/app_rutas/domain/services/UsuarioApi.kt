@@ -8,16 +8,12 @@ import retrofit2.http.*
 
 interface UsuarioApi {
 
-    @POST("usuarios/login")
-    suspend fun login(@Body credenciales: Map<String, String>): Response<UsuarioResponse>
-
     @Multipart
     @POST("usuarios/registro")
     suspend fun registrarUsuario(
-        @Part("data") data: RequestBody,
-        @Part fotoPerfil: MultipartBody.Part?,
-        @Part dniFrontal: MultipartBody.Part?,
-        @Part dniPosterior: MultipartBody.Part?
+        @Part("data") dataJson: RequestBody,
+        @Part fotoPerfil: MultipartBody.Part,
+        @Part dniFrontal: MultipartBody.Part,
+        @Part dniPosterior: MultipartBody.Part
     ): Response<UsuarioResponse>
-
 }

@@ -4,58 +4,52 @@ import android.content.ContentResolver
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.app_rutas.application.RetrofitClient
-import com.example.app_rutas.domain.entities.UsuarioRequest
 import com.example.app_rutas.domain.entities.UsuarioResponse
-import com.example.app_rutas.utils.toImagePart
-import com.google.gson.Gson
+import com.example.app_rutas.domain.repositories.UsuarioRepository
+import com.example.app_rutas.infrastructure.repositories.UsuarioRepositoryImpl
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody
 
-class RegisterViewModel : ViewModel() {
+class RegisterViewModel(
+    private val repo: UsuarioRepository = UsuarioRepositoryImpl()
+) : ViewModel() {
 
-    private val _registroExitoso = MutableStateFlow<UsuarioResponse?>(null)
-    val registroExitoso = _registroExitoso.asStateFlow()
+    private val _loading = MutableStateFlow(false)
+    val loading: StateFlow<Boolean> = _loading
 
-    fun registrarUsuario(
-        usuario: UsuarioRequest,
-        fotoPerfilUri: Uri,
-        dniFrontalUri: Uri,
-        dniPosteriorUri: Uri,
+    private val _resultado = MutableStateFlow<Result<UsuarioResponse>?>(null)
+    val resultado: StateFlow<Result<UsuarioResponse>?> = _resultado
+
+    fun registrar(
+        dni: String,
+        nombre: String,
+        correo: String,
+        celular: String,
+        password: String,
+        fotoPerfil: Uri,
+        dniFrontal: Uri,
+        dniPosterior: Uri,
         contentResolver: ContentResolver
     ) {
         viewModelScope.launch {
+            _loading.value = true
             try {
-                // JSON como RequestBody
-                val json = Gson().toJson(usuario)
-                val dataBody = RequestBody.create(
-                    "application/json; charset=utf-8".toMediaType(),
-                    json
+                val resp = repo.registrarUsuario(
+                    dni, nombre, correo, celular, password,
+                    fotoPerfil, dniFrontal, dniPosterior, contentResolver
                 )
-
-                // Partes de imagen
-                val partPerfil = contentResolver.toImagePart("fotoPerfil", fotoPerfilUri)
-                val partFrontal = contentResolver.toImagePart("dniFrontal", dniFrontalUri)
-                val partPosterior = contentResolver.toImagePart("dniPosterior", dniPosteriorUri)
-
-                val resp = RetrofitClient.usuarioApi.registrarUsuario(
-                    data = dataBody,
-                    fotoPerfil = partPerfil,
-                    dniFrontal = partFrontal,
-                    dniPosterior = partPosterior
-                )
-
-                if (resp.isSuccessful) {
-                    _registroExitoso.value = resp.body()
+                if (resp.isSuccessful && resp.body() != null) {
+                    _resultado.value = Result.success(resp.body()!!)
                 } else {
-                    _registroExitoso.value = null
+                    _resultado.value = Result.failure(
+                        RuntimeException("HTTP ${resp.code()} - ${resp.errorBody()?.string()}")
+                    )
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
-                _registroExitoso.value = null
+                _resultado.value = Result.failure(e)
+            } finally {
+                _loading.value = false
             }
         }
     }

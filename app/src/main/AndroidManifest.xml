@@ -8,9 +8,6 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
-
-
-
     <application
         android:name=".App"
         android:allowBackup="true"
@@ -30,10 +27,10 @@
             android:name=".ui.activity.MainActivity"
             android:exported="false" />
         <activity
-            android:name=".ui.RegisterActivity"
+            android:name=".ui.LoginActivity"
             android:exported="false" />
         <activity
-            android:name=".ui.LoginActivity"
+            android:name=".ui.RegisterActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
