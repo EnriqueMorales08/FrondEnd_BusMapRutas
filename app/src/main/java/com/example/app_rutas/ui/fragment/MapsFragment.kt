@@ -40,6 +40,7 @@ import org.json.JSONObject
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.hypot // NUEVO: para distancias en metros
 
 class MapsFragment : Fragment(), OnMapReadyCallback {
 
@@ -68,7 +69,11 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
     private var marcadorBusSuperStar: Marker? = null
     private var ultimaPosBus: LatLng? = null
     private var busAnimator: ValueAnimator? = null
-    private val BUS_ANIM_DURATION = 9_500L // animación suave entre updates de ~10s
+    private val BUS_ANIM_DURATION = 5_000L // animación suave entre updates de ~10s
+
+    // NUEVO: polilínea “snappeada” y umbral para pegar el bus a la ruta
+    private var rutaActualLatLngs: List<LatLng> = emptyList()   // se llena en snapToRoadsYMostrarRuta
+    private val BUS_SNAP_MAX_METERS = 60.0                      // sube/baja según ruido del GPS
 
     private val paraderoViewModel: ParaderoViewModel by viewModels {
         ParaderoViewModelFactory(ObtenerParaderoCercanoUseCase(ParaderoRepositoryImpl()))
@@ -152,30 +157,37 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
             )
         }
 
-        // Observa la posición del bus
+        // Observa la posición del bus (PEGADO a la polilínea si está cerca)
         busViewModel.posicion.observe(viewLifecycleOwner) { pos ->
             val lat = pos?.latitud ?: return@observe
             val lng = pos.longitud ?: return@observe
             val vel = pos.velocidad
-            val nuevaPos = LatLng(lat, lng)
+            val posCruda = LatLng(lat, lng)
+
+            // Por defecto usamos la lectura cruda; si la ruta está cargada, probamos “snap”
+            var destino = posCruda
+            if (rutaActualLatLngs.size >= 2) {
+                val (puntoSnap, distM) = closestPointOnPath(posCruda, rutaActualLatLngs) // NUEVO
+                if (distM <= BUS_SNAP_MAX_METERS) destino = puntoSnap
+            }
 
             if (marcadorBusSuperStar == null) {
-                val icon = getScaledMarkerIcon(R.drawable.ic_bus, 90, 90) // tu drawable bus.jpeg
+                val icon = getScaledMarkerIcon(R.drawable.ic_bus, 90, 90) // tu drawable del bus
                 marcadorBusSuperStar = googleMap.addMarker(
                     MarkerOptions()
-                        .position(nuevaPos)
+                        .position(destino)
                         .title("Bus SUPER STAR")
                         .snippet(if (vel != null) "Vel: $vel km/h" else null)
                         .icon(icon)
                         .anchor(0.5f, 0.5f)
                         .flat(true)
                 )
-                googleMap.animateCamera(CameraUpdateFactory.newLatLngZoom(nuevaPos, 16f))
-                ultimaPosBus = nuevaPos
+                googleMap.animateCamera(CameraUpdateFactory.newLatLngZoom(destino, 16f))
+                ultimaPosBus = destino
             } else {
-                val desde = ultimaPosBus ?: nuevaPos
-                animateBusMarker(desde, nuevaPos, BUS_ANIM_DURATION, vel)
-                ultimaPosBus = nuevaPos
+                val desde = ultimaPosBus ?: destino
+                animateBusMarker(desde, destino, BUS_ANIM_DURATION, vel)
+                ultimaPosBus = destino
             }
         }
     }
@@ -247,6 +259,8 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
             ultimaRutaHastaParadero?.remove()
             ultimaRutaHastaParadero = null
             paraderoActual = null
+
+            rutaActualLatLngs = emptyList() // NUEVO: limpiar polilínea actual
 
             rutaViewModel.obtenerRuta(rutaSeleccionada.id)
             informacionViewModel.obtenerInformacion(rutaSeleccionada.empresa.id)
@@ -324,6 +338,9 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
                         .width(10f)
                     googleMap.addPolyline(polylineOptions)
 
+                    // NUEVO: guarda la polilínea para pegar el bus
+                    rutaActualLatLngs = snappedLatLngs
+
                     val bounds = LatLngBounds.builder()
                     snappedLatLngs.forEach { bounds.include(it) }
                     googleMap.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds.build(), 100))
@@ -382,5 +399,67 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
         busViewModel.stop()
         marcadorBusSuperStar = null
         ultimaPosBus = null
+        rutaActualLatLngs = emptyList() // NUEVO: limpia cache de polilínea
+    }
+
+    // ===================== GEOMETRÍA (pegado a polilínea) =====================
+    // Proyecta 'p' al punto más cercano sobre la polilínea 'path' (devuelve punto y distancia en metros)
+    private fun closestPointOnPath(p: LatLng, path: List<LatLng>): Pair<LatLng, Double> {
+        if (path.size < 2) return p to Double.POSITIVE_INFINITY
+
+        var bestPoint = path[0]
+        var bestDist = Double.POSITIVE_INFINITY
+
+        for (i in 0 until path.lastIndex) {
+            val a = path[i]
+            val b = path[i + 1]
+            val (proj, dist) = closestPointOnSegmentMeters(p, a, b)
+            if (dist < bestDist) {
+                bestDist = dist
+                bestPoint = proj
+            }
+        }
+        return bestPoint to bestDist
+    }
+
+    // Punto más cercano de 'p' al segmento [a,b], usando proyección equirectangular local (metros)
+    private fun closestPointOnSegmentMeters(p: LatLng, a: LatLng, b: LatLng): Pair<LatLng, Double> {
+        val R = 6371000.0
+        val deg2rad = Math.PI / 180.0
+        val latRef = (a.latitude + b.latitude) / 2.0
+        val cosRef = cos(latRef * deg2rad)
+
+        // Vector AB en metros
+        val dx = (b.longitude - a.longitude) * deg2rad * R * cosRef
+        val dy = (b.latitude - a.latitude) * deg2rad * R
+
+        // Vector AP en metros
+        val px = (p.longitude - a.longitude) * deg2rad * R * cosRef
+        val py = (p.latitude - a.latitude) * deg2rad * R
+
+        val denom = dx * dx + dy * dy
+        if (denom == 0.0) {
+            val distA = hypot(px, py)
+            return a to distA
+        }
+
+        // Proyección escalar t en [0,1]
+        var t = (px * dx + py * dy) / denom
+        if (t < 0) t = 0.0
+        if (t > 1) t = 1.0
+
+        // Punto proyectado (metros desde A)
+        val projX = dx * t
+        val projY = dy * t
+
+        // Distancia p -> proyección
+        val dist = hypot(px - projX, py - projY)
+
+        // Convertir a LatLng
+        val projLat = a.latitude + (projY / R) * (180.0 / Math.PI)
+        val projLng = a.longitude + (projX / (R * cosRef)) * (180.0 / Math.PI)
+
+        return LatLng(projLat, projLng) to dist
     }
 }
+
