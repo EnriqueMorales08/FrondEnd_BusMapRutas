@@ -1,6 +1,7 @@
 package com.example.app_rutas.domain.services
 
 import com.example.app_rutas.domain.entities.UsuarioResponse
+import com.example.app_rutas.domain.entities.UsuarioRemoto
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import retrofit2.Response
@@ -16,4 +17,7 @@ interface UsuarioApi {
         @Part dniFrontal: MultipartBody.Part,
         @Part dniPosterior: MultipartBody.Part
     ): Response<UsuarioResponse>
+
+    @GET("usuarios/remotos")
+    suspend fun listarUsuariosRemotos(): List<UsuarioRemoto>
 }
