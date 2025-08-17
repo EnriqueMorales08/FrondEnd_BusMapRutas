@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    id("kotlin-parcelize")
     alias(libs.plugins.google.services)
     alias(libs.plugins.ksp)
 }
@@ -83,4 +84,8 @@ dependencies {
     implementation(libs.bcrypt)
     implementation(libs.coil)
     ksp(libs.room.compiler)
+
+    implementation(libs.androidx.recyclerview)
+    implementation(libs.androidx.swiperefreshlayout)
+
 }
