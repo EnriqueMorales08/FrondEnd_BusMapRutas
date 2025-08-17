@@ -33,6 +33,9 @@ import com.google.android.gms.maps.model.*
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -40,7 +43,7 @@ import org.json.JSONObject
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
-import kotlin.math.hypot // NUEVO: para distancias en metros
+import kotlin.math.hypot
 
 class MapsFragment : Fragment(), OnMapReadyCallback {
 
@@ -69,11 +72,17 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
     private var marcadorBusSuperStar: Marker? = null
     private var ultimaPosBus: LatLng? = null
     private var busAnimator: ValueAnimator? = null
-    private val BUS_ANIM_DURATION = 5_000L // animación suave entre updates de ~10s
+    private val BUS_ANIM_DURATION = 5_000L // animación entre updates
 
-    // NUEVO: polilínea “snappeada” y umbral para pegar el bus a la ruta
-    private var rutaActualLatLngs: List<LatLng> = emptyList()   // se llena en snapToRoadsYMostrarRuta
-    private val BUS_SNAP_MAX_METERS = 60.0                      // sube/baja según ruido del GPS
+    // Polilínea “snappeada” y umbral para pegar el bus a la ruta
+    private var rutaActualLatLngs: List<LatLng> = emptyList()
+    private val BUS_SNAP_MAX_METERS = 60.0
+
+    // ====== NUEVO: ETA ======
+    private var velocidadBusKmh: Double? = null        // última velocidad reportada por Firebase
+    private var etaJob: Job? = null                    // loop de 1 minuto para recalcular ETA
+    private val ETA_RECALC_MS = 60_000L                // cada 1 minuto
+    // ========================
 
     private val paraderoViewModel: ParaderoViewModel by viewModels {
         ParaderoViewModelFactory(ObtenerParaderoCercanoUseCase(ParaderoRepositoryImpl()))
@@ -162,12 +171,13 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
             val lat = pos?.latitud ?: return@observe
             val lng = pos.longitud ?: return@observe
             val vel = pos.velocidad
+            velocidadBusKmh = vel  // ====== NUEVO: guardar última velocidad del Firebase ======
             val posCruda = LatLng(lat, lng)
 
             // Por defecto usamos la lectura cruda; si la ruta está cargada, probamos “snap”
             var destino = posCruda
             if (rutaActualLatLngs.size >= 2) {
-                val (puntoSnap, distM) = closestPointOnPath(posCruda, rutaActualLatLngs) // NUEVO
+                val (puntoSnap, distM) = closestPointOnPath(posCruda, rutaActualLatLngs)
                 if (distM <= BUS_SNAP_MAX_METERS) destino = puntoSnap
             }
 
@@ -188,6 +198,11 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
                 val desde = ultimaPosBus ?: destino
                 animateBusMarker(desde, destino, BUS_ANIM_DURATION, vel)
                 ultimaPosBus = destino
+            }
+
+            // ====== NUEVO: si ya hay paradero seleccionado, refrescar ETA inmediatamente ======
+            if (paraderoActual != null) {
+                actualizarEtaYUi(mostrarToast = false)
             }
         }
     }
@@ -234,6 +249,9 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
             )
             googleMap.animateCamera(CameraUpdateFactory.newLatLngZoom(latLng, 17f))
             paraderoActual = it
+
+            // ====== NUEVO: inicia/renueva el loop de ETA ======
+            startEtaLoop()
         }
     }
 
@@ -252,20 +270,23 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
             val rutaSeleccionada = rutas[position]
             bottomSheetBehavior.state = BottomSheetBehavior.STATE_HIDDEN
 
+            // ====== NUEVO: al cambiar de ruta, limpiar ETA/paradero ======
+            stopEtaLoop()
+            paraderoActual = null
+
             rutaSeleccionadaActual = rutaSeleccionada
             googleMap.clear()
             marcadorParadero = null
             marcadorUsuario = null
             ultimaRutaHastaParadero?.remove()
             ultimaRutaHastaParadero = null
-            paraderoActual = null
 
-            rutaActualLatLngs = emptyList() // NUEVO: limpiar polilínea actual
+            rutaActualLatLngs = emptyList() // limpiar polilínea actual
 
             rutaViewModel.obtenerRuta(rutaSeleccionada.id)
             informacionViewModel.obtenerInformacion(rutaSeleccionada.empresa.id)
 
-            // Encender/apagar seguimiento de bus según la EMPRESA (no según el texto mostrado)
+            // Encender/apagar seguimiento de bus según la EMPRESA
             marcadorBusSuperStar?.remove()
             marcadorBusSuperStar = null
             ultimaPosBus = null
@@ -338,7 +359,7 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
                         .width(10f)
                     googleMap.addPolyline(polylineOptions)
 
-                    // NUEVO: guarda la polilínea para pegar el bus
+                    // guarda la polilínea para pegar el bus y calcular ETA
                     rutaActualLatLngs = snappedLatLngs
 
                     val bounds = LatLngBounds.builder()
@@ -399,7 +420,8 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
         busViewModel.stop()
         marcadorBusSuperStar = null
         ultimaPosBus = null
-        rutaActualLatLngs = emptyList() // NUEVO: limpia cache de polilínea
+        rutaActualLatLngs = emptyList()
+        stopEtaLoop()
     }
 
     // ===================== GEOMETRÍA (pegado a polilínea) =====================
@@ -443,23 +465,187 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
             return a to distA
         }
 
-        // Proyección escalar t en [0,1]
         var t = (px * dx + py * dy) / denom
         if (t < 0) t = 0.0
         if (t > 1) t = 1.0
 
-        // Punto proyectado (metros desde A)
         val projX = dx * t
         val projY = dy * t
 
-        // Distancia p -> proyección
         val dist = hypot(px - projX, py - projY)
 
-        // Convertir a LatLng
         val projLat = a.latitude + (projY / R) * (180.0 / Math.PI)
         val projLng = a.longitude + (projX / (R * cosRef)) * (180.0 / Math.PI)
 
         return LatLng(projLat, projLng) to dist
     }
-}
+    // ========================================================================
 
+    // ===================== ETA SOBRE TU POLILÍNEA ============================
+    private data class Proj(
+        val index: Int,          // índice del segmento [i, i+1]
+        val point: LatLng,       // punto proyectado sobre el segmento
+        val t: Double,           // posición relativa dentro del segmento (0..1)
+        val segLen: Double,      // longitud del segmento en m
+        val offDist: Double      // distancia de p al segmento (m)
+    )
+
+    private fun projectOnPathWithIndex(p: LatLng, path: List<LatLng>): Proj? {
+        if (path.size < 2) return null
+        var best: Proj? = null
+        for (i in 0 until path.lastIndex) {
+            val a = path[i]
+            val b = path[i + 1]
+            val r = projectOnSegmentWithT(p, a, b)
+            val candidate = Proj(i, r.point, r.t, r.segLen, r.offDist)
+            if (best == null || candidate.offDist < best!!.offDist) best = candidate
+        }
+        return best
+    }
+
+    private data class ProjRaw(val point: LatLng, val t: Double, val segLen: Double, val offDist: Double)
+
+    // Proyección con parámetro t y longitudes en metros
+    private fun projectOnSegmentWithT(p: LatLng, a: LatLng, b: LatLng): ProjRaw {
+        val R = 6371000.0
+        val deg2rad = Math.PI / 180.0
+        val latRef = (a.latitude + b.latitude) / 2.0
+        val cosRef = cos(latRef * deg2rad)
+
+        val dx = (b.longitude - a.longitude) * deg2rad * R * cosRef
+        val dy = (b.latitude - a.latitude) * deg2rad * R
+        val segLen = hypot(dx, dy)
+
+        val px = (p.longitude - a.longitude) * deg2rad * R * cosRef
+        val py = (p.latitude - a.latitude) * deg2rad * R
+
+        val denom = dx * dx + dy * dy
+        val tUnclamped = if (denom == 0.0) 0.0 else (px * dx + py * dy) / denom
+        val t = when {
+            tUnclamped < 0 -> 0.0
+            tUnclamped > 1 -> 1.0
+            else -> tUnclamped
+        }
+
+        val projX = dx * t
+        val projY = dy * t
+        val offDist = hypot(px - projX, py - projY)
+
+        val projLat = a.latitude + (projY / R) * (180.0 / Math.PI)
+        val projLng = a.longitude + (projX / (R * cosRef)) * (180.0 / Math.PI)
+        return ProjRaw(LatLng(projLat, projLng), t, segLen, offDist)
+    }
+
+    private fun segLenMeters(a: LatLng, b: LatLng): Double {
+        val R = 6371000.0
+        val deg2rad = Math.PI / 180.0
+        val latRef = (a.latitude + b.latitude) / 2.0
+        val cosRef = cos(latRef * deg2rad)
+        val dx = (b.longitude - a.longitude) * deg2rad * R * cosRef
+        val dy = (b.latitude - a.latitude) * deg2rad * R
+        return hypot(dx, dy)
+    }
+
+    // Distancia mínima sobre la polilínea entre dos puntos proyectados
+    private fun distanceAlongPath(from: Proj, to: Proj, path: List<LatLng>): Double {
+        if (path.size < 2) return Double.NaN
+
+        fun forward(a: Proj, b: Proj): Double {
+            return if (a.index == b.index) {
+                kotlin.math.abs(b.t - a.t) * a.segLen
+            } else if (a.index < b.index) {
+                var d = (1 - a.t) * a.segLen
+                for (i in a.index + 1 until b.index) {
+                    d += segLenMeters(path[i], path[i + 1])
+                }
+                d += b.t * b.segLen
+                d
+            } else {
+                // invertido
+                var d = a.t * a.segLen
+                for (i in a.index - 1 downTo b.index + 1) {
+                    d += segLenMeters(path[i], path[i - 1])
+                }
+                d += (1 - b.t) * b.segLen
+                d
+            }
+        }
+        // Toma el menor (por si el bus va “al revés” y la ruta hace curvas)
+        val d1 = forward(from, to)
+        val d2 = forward(to, from)
+        return kotlin.math.min(d1, d2)
+    }
+
+    private fun humanEta(seconds: Long): String {
+        val m = seconds / 60
+        val s = seconds % 60
+        return if (m > 0) "${m}m ${s}s" else "${s}s"
+    }
+
+    private fun humanDist(meters: Double): String {
+        return if (meters < 950) "${meters.toInt()} m" else String.format("%.1f km", meters / 1000.0)
+    }
+    // =======================================================================
+
+    // ====== LOOP de ETA cada minuto + refrescos puntuales ======
+    private fun startEtaLoop() {
+        // cálculo inmediato y toast inicial
+        actualizarEtaYUi(mostrarToast = true)
+
+        etaJob?.cancel()
+        etaJob = CoroutineScope(Dispatchers.Main).launch {
+            while (isActive && paraderoActual != null) {
+                delay(ETA_RECALC_MS)
+                actualizarEtaYUi(mostrarToast = false)
+            }
+        }
+    }
+
+    private fun stopEtaLoop() {
+        etaJob?.cancel()
+        etaJob = null
+    }
+
+    private fun actualizarEtaYUi(mostrarToast: Boolean) {
+        val bus = marcadorBusSuperStar?.position ?: return
+        val parada = paraderoActual ?: return
+
+        // 1) Proyectar bus y paradero a la polilínea
+        val distMetros: Double = if (rutaActualLatLngs.size >= 2) {
+            val from = projectOnPathWithIndex(bus, rutaActualLatLngs) ?: return
+            val to = projectOnPathWithIndex(LatLng(parada.latitud, parada.longitud), rutaActualLatLngs) ?: return
+            distanceAlongPath(from, to, rutaActualLatLngs)
+        } else {
+            // Fallback: distancia recta si no hay polilínea
+            val out = FloatArray(1)
+            Location.distanceBetween(
+                bus.latitude, bus.longitude,
+                parada.latitud, parada.longitud, out
+            )
+            out[0].toDouble()
+        }
+
+        // 2) Velocidad en m/s (Firebase en km/h). Fallback si no hay dato fiable.
+        val vKmh = velocidadBusKmh
+        val speedMps = when {
+            vKmh != null && vKmh > 3.0 -> (vKmh * 1000.0) / 3600.0
+            else -> 30.0 * 1000.0 / 3600.0  // ~30 km/h por defecto
+        }
+
+        val etaSec = kotlin.math.max(1.0, distMetros / speedMps).toLong()
+        val etaStr = humanEta(etaSec)
+        val distStr = humanDist(distMetros)
+        val velStr = vKmh?.let { String.format("%.0f km/h", it) } ?: "—"
+
+        marcadorBusSuperStar?.apply {
+            title = "Bus SUPER STAR"
+            snippet = "Vel: $velStr · ETA: $etaStr · Dist: $distStr"
+            showInfoWindow()
+        }
+
+        if (mostrarToast) {
+            Toast.makeText(requireContext(), "ETA al paradero: $etaStr (dist: $distStr)", Toast.LENGTH_SHORT).show()
+        }
+    }
+    // ===========================================================
+}
