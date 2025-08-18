@@ -1,53 +1,56 @@
 package com.example.app_rutas.ui
 
-import android.util.Log
+import android.content.ContentResolver
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.app_rutas.domain.entities.UsuarioResponse
 import com.example.app_rutas.domain.repositories.UsuarioRepository
+import com.example.app_rutas.infrastructure.repositories.UsuarioRepositoryImpl
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import okhttp3.MultipartBody
-import okhttp3.RequestBody
 
-class RegisterViewModel(private val usuarioRepository: UsuarioRepository) : ViewModel() {
+class RegisterViewModel(
+    private val repo: UsuarioRepository = UsuarioRepositoryImpl()
+) : ViewModel() {
 
-    private val _registroExitoso = MutableStateFlow<Boolean?>(null)
-    val registroExitoso: StateFlow<Boolean?> = _registroExitoso
+    private val _loading = MutableStateFlow(false)
+    val loading: StateFlow<Boolean> = _loading
 
-    fun registrarUsuario(
-        nombre: RequestBody,
-        correo: RequestBody,
-        celular: RequestBody,
-        password: RequestBody,
-        dni: RequestBody,
-        estado: RequestBody,
-        fotoPerfil: MultipartBody.Part,
-        dniFrontal: MultipartBody.Part,
-        dniPosterior: MultipartBody.Part
+    private val _resultado = MutableStateFlow<Result<UsuarioResponse>?>(null)
+    val resultado: StateFlow<Result<UsuarioResponse>?> = _resultado
+
+    fun registrar(
+        dni: String,
+        nombre: String,
+        correo: String,
+        celular: String,
+        password: String,
+        fotoPerfil: Uri,
+        dniFrontal: Uri,
+        dniPosterior: Uri,
+        contentResolver: ContentResolver
     ) {
         viewModelScope.launch {
+            _loading.value = true
             try {
-                val resultado = usuarioRepository.registrarUsuarioConMultipart(
-                    nombre,
-                    correo,
-                    celular,
-                    password,
-                    dni,
-                    estado,
-                    fotoPerfil,
-                    dniFrontal,
-                    dniPosterior
+                val resp = repo.registrarUsuario(
+                    dni, nombre, correo, celular, password,
+                    fotoPerfil, dniFrontal, dniPosterior, contentResolver
                 )
-                Log.d("RegisterViewModel", "Resultado del registro: $resultado")
-                _registroExitoso.value = resultado
+                if (resp.isSuccessful && resp.body() != null) {
+                    _resultado.value = Result.success(resp.body()!!)
+                } else {
+                    _resultado.value = Result.failure(
+                        RuntimeException("HTTP ${resp.code()} - ${resp.errorBody()?.string()}")
+                    )
+                }
             } catch (e: Exception) {
-                Log.e("RegisterViewModel", "Error al registrar usuario", e)
-                _registroExitoso.value = false
+                _resultado.value = Result.failure(e)
+            } finally {
+                _loading.value = false
             }
         }
     }
 }
-
-
-

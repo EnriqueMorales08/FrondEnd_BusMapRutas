@@ -1,30 +1,32 @@
 package com.example.app_rutas.domain.repositories
 
-import okhttp3.MultipartBody
-import okhttp3.RequestBody
+import android.content.ContentResolver
+import android.net.Uri
+import com.example.app_rutas.application.RetrofitClient
+
+import com.example.app_rutas.domain.entities.UsuarioResponse
+import com.example.app_rutas.utils.MultipartHelpers
+import retrofit2.Response
 
 interface UsuarioRepository {
+    suspend fun registrarUsuario(
+        dni: String,
+        nombre: String,
+        correo: String,
+        celular: String,
+        password: String,
+        fotoPerfilUri: Uri,
+        dniFrontalUri: Uri,
+        dniPosteriorUri: Uri,
+        cr: ContentResolver
+    ): Response<UsuarioResponse> {
+        val dataJson = MultipartHelpers.buildDataJsonPart(dni, nombre, correo, celular, password)
+        val partFoto  = MultipartHelpers.buildImagePart("fotoPerfil",   fotoPerfilUri, cr,   "fotoPerfil.jpg")
+        val partFront = MultipartHelpers.buildImagePart("dniFrontal",    dniFrontalUri, cr,   "dniFrontal.jpg")
+        val partBack  = MultipartHelpers.buildImagePart("dniPosterior",  dniPosteriorUri, cr, "dniPosterior.jpg")
 
-    suspend fun login(dni: String, contraseña: String): com.example.app_rutas.domain.entities.UsuarioRequest?
-
-    suspend fun registrar(
-        usuario: com.example.app_rutas.domain.entities.UsuarioRequest,
-        fotoPerfilUri: android.net.Uri,
-        dniFrenteUri: android.net.Uri,
-        dniReversoUri: android.net.Uri
-    ): Boolean
-
-    // NUEVO: Método compatible con Multipart
-    suspend fun registrarUsuarioConMultipart(
-        nombre: RequestBody,
-        correo: RequestBody,
-        celular: RequestBody,
-        password: RequestBody,
-        dni: RequestBody,
-        estado: RequestBody,
-        fotoPerfil: MultipartBody.Part,
-        dniFrontal: MultipartBody.Part,
-        dniPosterior: MultipartBody.Part
-    ): Boolean
+        return RetrofitClient.usuarioApi.registrarUsuario(
+            dataJson, partFoto, partFront, partBack
+        )
+    }
 }
-

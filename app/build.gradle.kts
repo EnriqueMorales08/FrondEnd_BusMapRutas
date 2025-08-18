@@ -1,18 +1,20 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    id("kotlin-parcelize")
     alias(libs.plugins.google.services)
+    alias(libs.plugins.ksp)
 }
 
 
 android {
     namespace = "com.example.app_rutas"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.example.app_rutas"
         minSdk = 29
-        targetSdk = 35
+        targetSdk = 34
         versionCode = 1
         versionName = "1.0"
 
@@ -72,5 +74,19 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso.core)
     implementation(libs.play.services.location)
     implementation(libs.androidx.fragment.ktx)
+
+    implementation(libs.converter.moshi)
+    implementation(libs.moshi)
+    implementation(libs.moshi.kotlin)
+    implementation(libs.room.runtime)
+    implementation(libs.room.ktx)
+    implementation(libs.work.ktx)
+    implementation(libs.bcrypt)
+    implementation(libs.coil)
+    ksp(libs.room.compiler)
+
+    implementation(libs.androidx.recyclerview)
+    implementation(libs.androidx.swiperefreshlayout)
+    implementation(libs.androidx.lifecycle.livedata.ktx)
 
 }

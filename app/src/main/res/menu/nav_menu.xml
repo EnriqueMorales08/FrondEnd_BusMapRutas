@@ -1,25 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
-<menu
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
-    tools:showIn='navigation_view'>
+    tools:showIn="navigation_view">
 
-    <group
-        android:checkableBehavior="single">
+    <group android:checkableBehavior="single">
         <item
             android:id="@+id/nav_home"
             android:icon="@drawable/baseline_home_24"
             android:title="Home"/>
         <item
-            android:id="@+id/nav_contac"
-            android:icon="@drawable/baseline_home_24"
-            android:title="Contact Us"/>
-        <item
             android:id="@+id/nav_planificador"
             android:icon="@drawable/ic_directions"
-             android:title="Buscar Ruta" />
-
+            android:title="Buscar Ruta"/>
+        <item
+            android:id="@+id/nav_notifications"
+            android:title="Notificaciones"
+            android:icon="@drawable/ic_notifications_24"
+            android:actionLayout="@layout/menu_item_badge" />
 
     </group>
 
+    <!-- Separador opcional (visualmente ayuda) -->
+    <item android:title="" />
+
+    <!-- Grupo para acciones (no chequeable) -->
+    <group android:checkableBehavior="none">
+        <item
+            android:id="@+id/nav_contac"
+            android:icon="@drawable/baseline_home_24"
+            android:title="Contactanos"/>
+        <item
+            android:id="@+id/nav_logout"
+            android:icon="@drawable/ic_logout_24"
+            android:title="Cerrar sesión"/>
+    </group>
 </menu>

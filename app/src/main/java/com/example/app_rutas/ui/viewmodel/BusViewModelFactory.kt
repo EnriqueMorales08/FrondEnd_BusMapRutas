@@ -15,4 +15,3 @@ class BusViewModelFactory(
         throw IllegalArgumentException("Unknown ViewModel class")
     }
 }
-

@@ -1,40 +1,50 @@
 [versions]
-androidGradlePlugin = "8.2.0"
+androidGradlePlugin = "8.9.1"
 androidMapsUtilsVersion = "2.4.0"
-fragmentKtx = "1.8.8"
-googleMaterial = "1.11.0"
+fragmentKtx = "1.8.9"
+googleMaterial = "1.12.0"
 kotlin = "2.0.21"
-kotlinxCoroutines = "1.7.3"
-okhttpVersion = "4.10.0"
-places = "3.5.0"
-coreKtx = "1.12.0"
-appcompat = "1.7.0"
-lifecycleRuntimeKtxVersion = "2.6.1"
+kotlinxCoroutines = "1.9.0"
+okhttpVersion = "4.12.0"
+places = "4.4.1"
+coreKtx = "1.17.0"
+appcompat = "1.7.1"
+lifecycleRuntimeKtxVersion = "2.9.2"
 material = "1.12.0"
 activity = "1.10.1"
 constraintlayout = "2.2.1"
 
 playServicesLocation = "21.3.0"
-playServicesMapsVersion = "18.1.0"
+playServicesMapsVersion = "19.2.0"
 retrofit = "2.9.0"
 converterGson = "2.9.0"
-loggingInterceptor = "4.9.3"
+loggingInterceptor = "4.12.0"
 volley = "1.2.1"
 cronetEmbedded = "119.6045.31"
 
-lifecycleViewmodelKtx = "2.9.1"
+lifecycleViewmodelKtx = "2.9.2"
 
 firebaseAuth = "23.2.1"
-firebaseDatabase = "20.3.1"
-firebaseStorage = "21.0.2"
+firebaseDatabase = "21.0.0"
+firebaseStorage = "22.0.0"
 json = "20231013"
 
 junit = "4.13.2"
-junitVersion = "1.2.1"
-espressoCore = "3.6.1"
+junitVersion = "1.3.0"
+espressoCore = "3.7.0"
 
-googleServices = "4.4.2"
+googleServices = "4.4.3"
 playServicesMaps = "19.2.0"
+
+moshi = "1.15.1"
+room = "2.7.2"
+work = "2.10.3"
+ksp = "2.0.21-1.0.25"
+bcrypt = "0.9.0"
+coil = "2.7.0"
+
+recyclerview = "1.3.2"
+swiperefreshlayout = "1.1.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -71,9 +81,25 @@ androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "j
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
 play-services-maps = { group = "com.google.android.gms", name = "play-services-maps", version.ref = "playServicesMaps" }
 
+converter-moshi = { group = "com.squareup.retrofit2", name = "converter-moshi", version.ref = "retrofit" }
+moshi = { group = "com.squareup.moshi", name = "moshi", version.ref = "moshi" }
+moshi-kotlin = { group = "com.squareup.moshi", name = "moshi-kotlin", version.ref = "moshi" }
+room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
+room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
+room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+work-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "work" }
+bcrypt = { group = "at.favre.lib", name = "bcrypt", version.ref = "bcrypt" }
+coil = { group = "io.coil-kt", name = "coil", version.ref = "coil" }
+coil-gif = { group = "io.coil-kt", name = "coil-gif", version.ref = "coil" }
+coil-svg = { group = "io.coil-kt", name = "coil-svg", version.ref = "coil" }
+coil-video = { group = "io.coil-kt", name = "coil-video", version.ref = "coil" }
+
+androidx-recyclerview = { group = "androidx.recyclerview", name = "recyclerview", version.ref = "recyclerview" }
+androidx-swiperefreshlayout = { group = "androidx.swiperefreshlayout", name = "swiperefreshlayout", version.ref = "swiperefreshlayout" }
+androidx-lifecycle-livedata-ktx = { group = "androidx.lifecycle", name = "lifecycle-livedata-ktx", version.ref = "lifecycleViewmodelKtx" }
+
 [plugins]
 android-application = { id = "com.android.application", version.ref = "androidGradlePlugin" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 google-services = { id = "com.google.gms.google-services", version.ref = "googleServices" }
-
-
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
