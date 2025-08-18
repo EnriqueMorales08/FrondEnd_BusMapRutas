@@ -8,30 +8,44 @@
     android:layout_height="match_parent"
     tools:context=".ui.fragment.MapsFragment">
 
-
-
-    <com.google.android.material.textfield.TextInputLayout
-        android:id="@+id/text_input_layout"
+    <!-- Barra superior: botón menú + dropdown -->
+    <LinearLayout
+        android:id="@+id/topBar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_alignParentTop="true"
+        android:orientation="horizontal"
         android:layout_margin="16dp"
-        android:hint="@string/rutas"
-        android:textColorHint="#000000"
-        android:elevation="8dp"
-        style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.ExposedDropdownMenu">
+        android:gravity="center_vertical"
+        android:elevation="8dp">
 
-        <AutoCompleteTextView
-            android:id="@+id/auto"
-            android:layout_width="match_parent"
+        <ImageButton
+            android:id="@+id/btnDrawer"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="@drawable/bg_round_orange"
+            android:padding="8dp"
+            android:src="@drawable/ic_menu_24"
+            android:contentDescription="@string/app_name" />
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/text_input_layout"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:inputType="none"
-            android:shadowColor="#ffff"
-            android:background="#F44336"
-            />
+            android:layout_weight="1"
+            android:layout_marginStart="8dp"
+            android:hint="@string/rutas"
+            android:textColorHint="#000000"
+            android:elevation="8dp"
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.ExposedDropdownMenu">
 
-    </com.google.android.material.textfield.TextInputLayout>
-
+            <AutoCompleteTextView
+                android:id="@+id/auto"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="none"
+                android:background="@color/orange"/>
+        </com.google.android.material.textfield.TextInputLayout>
+    </LinearLayout>
 
     <fragment
         android:id="@+id/map"
@@ -43,10 +57,11 @@
         android:id="@+id/btnParaderoCercano"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Más cercano"
+        android:text="+"
+        android:backgroundTint="@color/orange"
         android:layout_gravity="bottom|end"
         android:layout_marginEnd="20dp"
-        android:layout_marginBottom="110dp" /> <!-- Ajusta esta distancia según el alto del BottomSheet -->
+        android:layout_marginBottom="110dp" />
 
 
     <include layout="@layout/bottom_sheet_informacion" />

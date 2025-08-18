@@ -179,4 +179,13 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             }
         }
     }
+
+
+    fun toggleDrawer() {
+        if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
+            drawerLayout.closeDrawer(GravityCompat.START)
+        } else {
+            drawerLayout.openDrawer(GravityCompat.START)
+        }
+    }
 }

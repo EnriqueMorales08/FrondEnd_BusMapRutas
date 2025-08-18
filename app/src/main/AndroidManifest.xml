@@ -25,6 +25,7 @@
             android:value="AIzaSyAFpBlDKWCOpGY7MliuGGd8pCThUjXLkbA" />
         <activity
             android:name=".ui.activity.MainActivity"
+            android:windowDisablePreview="true"
             android:exported="false" />
         <activity
             android:name=".ui.RegisterActivity"

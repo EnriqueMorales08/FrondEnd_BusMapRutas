@@ -10,11 +10,16 @@ import androidx.lifecycle.lifecycleScope
 import at.favre.lib.crypto.bcrypt.BCrypt
 import com.example.app_rutas.R
 import com.example.app_rutas.infrastructure.repositories.UsuarioLoginRepository
+import com.example.app_rutas.ui.common.LoadingDialogFragment
 import com.example.app_rutas.ui.activity.MainActivity
+import android.os.SystemClock
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class LoginActivity : AppCompatActivity() {
 
+    private var loading: LoadingDialogFragment? = null
+    private var navigating = false
     private lateinit var editTextDni: EditText
     private lateinit var editPassword: EditText
     private lateinit var btn_login: Button
@@ -41,6 +46,7 @@ class LoginActivity : AppCompatActivity() {
         }
 
         btn_login.isEnabled = false
+        navigating = false
 
         lifecycleScope.launch {
             try {
@@ -48,15 +54,10 @@ class LoginActivity : AppCompatActivity() {
                 val user = users.firstOrNull { it.dni.trim() == dniInput }
 
                 if (user == null) {
-                    showError("DNI no encontrado")
-                    clearAllFields()
-                    return@launch
+                    showError("DNI no encontrado"); clearAllFields(); return@launch
                 }
-
-                if (!user.estado) {
-                    showError("Tu cuenta aún no ha sido validada")
-                    clearAllFields()
-                    return@launch
+                if (user.estado != true) {
+                    showError("Tu cuenta aún no ha sido validada"); clearAllFields(); return@launch
                 }
 
                 val ok = BCrypt.verifyer()
@@ -64,13 +65,13 @@ class LoginActivity : AppCompatActivity() {
                     .verified
 
                 if (!ok) {
-                    showError("Contraseña incorrecta")
-                    clearPassword()
-                    return@launch
+                    showError("Contraseña incorrecta"); clearPassword(); return@launch
                 }
 
-                val prefs = getSharedPreferences("rutas_prefs", MODE_PRIVATE)
-                prefs.edit()
+                showLoading(true)
+                val start = SystemClock.elapsedRealtime()
+
+                getSharedPreferences("rutas_prefs", MODE_PRIVATE).edit()
                     .putBoolean("isLoggedIn", true)
                     .putLong("userId", user.id)
                     .putString("dni", user.dni)
@@ -79,17 +80,38 @@ class LoginActivity : AppCompatActivity() {
                     .putString("fotoPerfil", user.fotoPerfil)
                     .apply()
 
+                // Mantenerlo visible mínimo X ms para que se note
+                val minShowMs = 700L
+                val elapsed = SystemClock.elapsedRealtime() - start
+                if (elapsed < minShowMs) delay(minShowMs - elapsed)
+
+                showLoading(false)
+
                 startActivity(
                     Intent(this@LoginActivity, MainActivity::class.java)
                         .putExtra("open_fragment", "maps")
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
                 )
-                finish()
 
             } catch (e: Exception) {
                 showError("Error de red: ${e.message ?: "intenta nuevamente"}")
             } finally {
                 btn_login.isEnabled = true
+                // por si acaso
+                showLoading(false)
             }
+        }
+    }
+
+    private fun showLoading(show: Boolean) {
+        if (show) {
+            if (loading?.isAdded != true) {
+                loading = LoadingDialogFragment.newInstance()
+                loading?.show(supportFragmentManager, "loading")
+            }
+        } else {
+            loading?.dismissAllowingStateLoss()
+            loading = null
         }
     }
 
