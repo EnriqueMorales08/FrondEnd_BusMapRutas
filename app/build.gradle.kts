@@ -88,5 +88,5 @@ dependencies {
     implementation(libs.androidx.recyclerview)
     implementation(libs.androidx.swiperefreshlayout)
     implementation(libs.androidx.lifecycle.livedata.ktx)
-
+    implementation(libs.androidx.core.splashscreen)
 }

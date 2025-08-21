@@ -28,14 +28,19 @@
             android:windowDisablePreview="true"
             android:exported="false" />
         <activity
+            android:name=".ui.LoginActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".ui.RegisterActivity"
             android:exported="false" />
+
         <activity
-            android:name=".ui.LoginActivity"
-            android:exported="true">
+            android:name=".ui.StartActivity"
+            android:exported="true"
+            android:theme="@style/Theme.App_rutas.Launcher">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
