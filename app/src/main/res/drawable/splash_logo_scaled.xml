@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<scale xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/bus"
+    android:scaleWidth="45%"
+    android:scaleHeight="45%"
+    android:gravity="center"/>

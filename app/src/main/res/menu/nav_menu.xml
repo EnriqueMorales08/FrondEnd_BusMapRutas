@@ -26,8 +26,8 @@
     <!-- Grupo para acciones (no chequeable) -->
     <group android:checkableBehavior="none">
         <item
-            android:id="@+id/nav_contac"
-            android:icon="@drawable/baseline_home_24"
+            android:id="@+id/nav_contacto"
+            android:icon="@drawable/baseline_support_agent_24"
             android:title="Contactanos"/>
         <item
             android:id="@+id/nav_logout"

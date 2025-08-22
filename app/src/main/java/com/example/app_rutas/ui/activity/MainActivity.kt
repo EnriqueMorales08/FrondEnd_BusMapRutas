@@ -17,6 +17,7 @@ import com.example.app_rutas.R
 import com.example.app_rutas.ui.LoginActivity
 import com.google.android.material.navigation.NavigationView
 import com.example.app_rutas.ui.fragment.MapsFragment
+import com.example.app_rutas.ui.fragment.ContactFragment
 import com.example.app_rutas.ui.fragment.RutaPlanificadaFragment
 import com.example.app_rutas.infrastructure.telemetry.TelemetryTracker
 import com.google.android.material.imageview.ShapeableImageView
@@ -101,7 +102,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         when(item.itemId){
             R.id.nav_home -> replaceFragment(MapsFragment())
             R.id.nav_planificador -> replaceFragment(RutaPlanificadaFragment())
-            //R.id.nav_contac -> replaceFragment(ContactFragment())
+            R.id.nav_contacto -> replaceFragment(ContactFragment())
             R.id.nav_notifications -> replaceFragment(NotificationsFragment())
             R.id.nav_logout -> {
                 androidx.appcompat.app.AlertDialog.Builder(this)

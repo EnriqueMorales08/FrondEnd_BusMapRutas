@@ -74,6 +74,9 @@ class RegisterActivity : AppCompatActivity() {
                 progressBar.visibility = View.GONE
                 if (result != null) {
                     result.onSuccess {
+                        getSharedPreferences("rutas_prefs", MODE_PRIVATE).edit()
+                            .putBoolean("is_registered", true)
+                            .apply()
                         mostrarMensaje("Registro exitoso: ${it.nombre}")
                         irALogin()
                     }.onFailure {
@@ -188,7 +191,9 @@ class RegisterActivity : AppCompatActivity() {
     }
 
     private fun irALogin() {
-        val intent = Intent(this, LoginActivity::class.java)
+        val intent = Intent(this, LoginActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        }
         startActivity(intent)
         finish()
     }
