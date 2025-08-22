@@ -11,7 +11,7 @@ import org.json.JSONObject
 class InformacionRepositoryImpl : InformacionRepository {
 
     private val client = OkHttpClient()
-    private val backendUrl = "http://192.168.101.9:8080/api/informacion"
+    private val backendUrl = "http://137.184.200.155:9090/api/informacion"
 
     override suspend fun obtenerInformacion(empresaId: Long): Informacion? = withContext(Dispatchers.IO) {
         val url = "$backendUrl/$empresaId"

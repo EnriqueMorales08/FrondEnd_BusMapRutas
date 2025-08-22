@@ -45,8 +45,8 @@ import okhttp3.Request
 import org.json.JSONObject
 import kotlin.math.atan2
 import kotlin.math.cos
-import kotlin.math.sin
 import kotlin.math.hypot
+import kotlin.math.sin
 
 class MapsFragment : Fragment(), OnMapReadyCallback {
 
@@ -96,6 +96,15 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
     private val rutaViewModel: RutaViewModel by viewModels { RutaViewModelFactory() }
     private val rutasDisponiblesViewModel: RutasDisponiblesViewModel by viewModels()
 
+    // ====== NUEVO: ocultar ubicación y línea al estar muy cerca (≤10 m) ======
+    private var ocultarUsuarioPorProximidad = false
+
+    // ====== NUEVO: control Directions para evitar spam ======
+    private var ultimoOrigen: LatLng? = null
+    private var ultimoDestino: LatLng? = null
+    private var ultimaPeticionTs: Long = 0L
+    private val MIN_DIRECTIONS_INTERVAL_MS = 15_000L
+
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View =
         inflater.inflate(R.layout.fragment_maps, container, false)
 
@@ -133,11 +142,10 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
 
         rutasDisponiblesViewModel.obtenerRutas()
 
-        // Ubicación del usuario (tu lógica original)
+        // Ubicación del usuario (tu lógica original + ajustes proximidad/directions)
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 val location = result.lastLocation ?: return
-                actualizarUbicacionEnMapa(location)
 
                 paraderoActual?.let { paradero ->
                     val origen = LatLng(location.latitude, location.longitude)
@@ -148,11 +156,30 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
                         origen.latitude, origen.longitude,
                         destino.latitude, destino.longitude, distancia
                     )
-                    if (distancia[0] > 20) {
-                        trazarRutaHastaParadero(origen, destino)
-                    } else {
+
+                    // ---- NUEVO: control de 10 m para ocultar marcador y ruta ----
+                    if (distancia[0] <= 10f) {
+                        ocultarUsuarioPorProximidad = true
+                        // borra línea roja y oculta marcador de usuario
                         ultimaRutaHastaParadero?.remove()
+                        ultimaRutaHastaParadero = null
+                        marcadorUsuario?.remove()
+                        marcadorUsuario = null
+                    } else {
+                        ocultarUsuarioPorProximidad = false
+                        // HISTERESIS: si te alejas >20 m, vuelve a trazar; entre 10 y 20 m mantén limpio
+                        if (distancia[0] > 20f) {
+                            trazarRutaHastaParadero(origen, destino) // <<--- MISMA FUNCIÓN, ahora con calles
+                        } else {
+                            ultimaRutaHastaParadero?.remove()
+                            ultimaRutaHastaParadero = null
+                        }
                     }
+                }
+
+                // Actualiza tu marker solo si no estamos ocultando por proximidad
+                if (!ocultarUsuarioPorProximidad) {
+                    actualizarUbicacionEnMapa(location)
                 }
             }
         }
@@ -312,6 +339,7 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
     }
 
     private fun actualizarUbicacionEnMapa(location: Location) {
+        if (ocultarUsuarioPorProximidad) return  // NUEVO: respeta proximidad
         if (!isAdded || context == null || view == null) return
         val latLng = LatLng(location.latitude, location.longitude)
         marcadorUsuario?.remove()
@@ -326,14 +354,88 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
         }
     }
 
-    private fun trazarRutaHastaParadero(origen: LatLng, destino: LatLng) {
-        val polylineOptions = PolylineOptions()
-            .add(origen)
-            .add(destino)
-            .color(android.graphics.Color.RED)
-            .width(8f)
+    // ---------- DIRECCIONES POR CALLES (Google Directions API) ----------
+    private fun trazarRutaHastaParadero(origen: LatLng, destino: LatLng, mode: String = "walking") {
+        val ahora = System.currentTimeMillis()
+        if (ahora - ultimaPeticionTs < MIN_DIRECTIONS_INTERVAL_MS &&
+            ultimoOrigen != null && ultimoDestino != null
+        ) {
+            val distO = FloatArray(1)
+            val distD = FloatArray(1)
+            Location.distanceBetween(ultimoOrigen!!.latitude, ultimoOrigen!!.longitude, origen.latitude, origen.longitude, distO)
+            Location.distanceBetween(ultimoDestino!!.latitude, ultimoDestino!!.longitude, destino.latitude, destino.longitude, distD)
+            if (distO[0] < 10 && distD[0] < 10) return
+        }
+
+        ultimaPeticionTs = ahora
+        ultimoOrigen = origen
+        ultimoDestino = destino
+
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val client = OkHttpClient()
+                val url: HttpUrl = HttpUrl.Builder()
+                    .scheme("https")
+                    .host("maps.googleapis.com")
+                    .addPathSegment("maps")
+                    .addPathSegment("api")
+                    .addPathSegment("directions")
+                    .addPathSegment("json")
+                    .addQueryParameter("origin", "${origen.latitude},${origen.longitude}")
+                    .addQueryParameter("destination", "${destino.latitude},${destino.longitude}")
+                    .addQueryParameter("mode", mode) // "walking" o "driving"
+                    .addQueryParameter("key", apiKey)
+                    .build()
+
+                val request = Request.Builder().url(url).build()
+                val response = client.newCall(request).execute()
+                val body = response.body?.string()
+
+                if (!response.isSuccessful || body.isNullOrEmpty()) {
+                    launch(Dispatchers.Main) { dibujarLineaRecta(origen, destino) }
+                    return@launch
+                }
+
+                val json = JSONObject(body)
+                val routes = json.optJSONArray("routes")
+                if (routes == null || routes.length() == 0) {
+                    launch(Dispatchers.Main) { dibujarLineaRecta(origen, destino) }
+                    return@launch
+                }
+
+                val route0 = routes.getJSONObject(0)
+                val overview = route0.getJSONObject("overview_polyline").getString("points")
+                val puntos = decodePolyline(overview)
+
+                launch(Dispatchers.Main) {
+                    // Limpia polyline anterior
+                    ultimaRutaHastaParadero?.remove()
+
+                    // Dibuja la ruta por calles en rojo (igual que tenías)
+                    ultimaRutaHastaParadero = googleMap.addPolyline(
+                        PolylineOptions()
+                            .addAll(puntos)
+                            .color(android.graphics.Color.RED)
+                            .width(8f)
+                    )
+                }
+            } catch (_: Exception) {
+                launch(Dispatchers.Main) {
+                    dibujarLineaRecta(origen, destino)
+                    Toast.makeText(requireContext(), "No se pudo obtener la ruta por calles. Línea directa temporal.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    private fun dibujarLineaRecta(origen: LatLng, destino: LatLng) {
         ultimaRutaHastaParadero?.remove()
-        ultimaRutaHastaParadero = googleMap.addPolyline(polylineOptions)
+        ultimaRutaHastaParadero = googleMap.addPolyline(
+            PolylineOptions()
+                .add(origen, destino)
+                .color(android.graphics.Color.RED)
+                .width(8f)
+        )
     }
 
     // ================== REEMPLAZADA: Snap to Roads por bloques (≤100) ==================
@@ -722,5 +824,38 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
         }
     }
     // ===========================================================
-}
 
+    // ---------- Decodificador de polilínea Google ----------
+    private fun decodePolyline(encoded: String): List<LatLng> {
+        val poly = ArrayList<LatLng>()
+        var index = 0
+        val len = encoded.length
+        var lat = 0
+        var lng = 0
+        while (index < len) {
+            var b: Int
+            var shift = 0
+            var result = 0
+            do {
+                b = encoded[index++].code - 63
+                result = result or ((b and 0x1f) shl shift)
+                shift += 5
+            } while (b >= 0x20)
+            val dlat = if ((result and 1) != 0) (result shr 1).inv() else (result shr 1)
+            lat += dlat
+            shift = 0
+            result = 0
+            do {
+                b = encoded[index++].code - 63
+                result = result or ((b and 0x1f) shl shift)
+                shift += 5
+            } while (b >= 0x20)
+            val dlng = if ((result and 1) != 0) (result shr 1).inv() else (result shr 1)
+            lng += dlng
+            val latD = lat / 1E5
+            val lngD = lng / 1E5
+            poly.add(LatLng(latD, lngD))
+        }
+        return poly
+    }
+}

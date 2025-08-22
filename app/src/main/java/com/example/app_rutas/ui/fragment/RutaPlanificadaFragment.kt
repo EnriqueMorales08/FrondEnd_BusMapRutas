@@ -1,16 +1,20 @@
 package com.example.app_rutas.ui.fragment
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.graphics.*
 import android.location.Location
 import android.os.Bundle
 import android.util.Log
 import android.view.*
 import android.widget.*
+import androidx.core.app.ActivityCompat
 import androidx.fragment.app.Fragment
 import com.example.app_rutas.R
 import com.example.app_rutas.infrastructure.repositories.RutaRepositoryImpl
 import com.example.app_rutas.model.RutaCompleta
 import com.example.app_rutas.ui.adapters.PlacesAutoCompleteAdapter
+import com.google.android.gms.location.*
 import com.google.android.gms.maps.*
 import com.google.android.gms.maps.model.*
 import com.google.android.libraries.places.api.Places
@@ -28,6 +32,11 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
     private lateinit var etDestino: AutoCompleteTextView
     private lateinit var leyendaContainer: LinearLayout
 
+    // Ubicación en tiempo real
+    private lateinit var fusedLocationClient: FusedLocationProviderClient
+    private var locationCallback: LocationCallback? = null
+    private var ultimaUbicacion: Location? = null
+
     private var marcadorUbicacion: Marker? = null
     private var marcadorDestino: Marker? = null
     private val marcadoresParaderos = mutableListOf<Marker>()
@@ -35,7 +44,6 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
 
     private val apiKey = "AIzaSyAFpBlDKWCOpGY7MliuGGd8pCThUjXLkbA"
     private val rutaRepository = RutaRepositoryImpl()
-    private val ubicacionActual = LatLng(-5.19449, -80.63282)
 
     private val coloresHue = listOf(
         BitmapDescriptorFactory.HUE_BLUE,
@@ -49,6 +57,8 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
     private var leyendaInicialAgregada = false
     private val TOLERANCIA_METROS = 600.0
 
+    private val REQUEST_LOCATION_PERMISSIONS = 1001
+
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         val view = inflater.inflate(R.layout.fragment_ruta_planificada, container, false)
         etDestino = view.findViewById(R.id.etDestino)
@@ -58,10 +68,10 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
         mapView.onCreate(savedInstanceState)
         mapView.getMapAsync(this)
 
+        // Places
         if (!Places.isInitialized()) {
             Places.initialize(requireContext().applicationContext, apiKey)
         }
-
         val placesClient = Places.createClient(requireContext())
         val adapter = PlacesAutoCompleteAdapter(requireContext(), placesClient)
         etDestino.setAdapter(adapter)
@@ -69,7 +79,6 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
         etDestino.setOnItemClickListener { _, _, position, _ ->
             val item = adapter.getItem(position)
             val placeId = item?.placeId ?: return@setOnItemClickListener
-
             val request = FetchPlaceRequest.builder(placeId, listOf(Place.Field.LAT_LNG)).build()
             placesClient.fetchPlace(request)
                 .addOnSuccessListener { response ->
@@ -85,34 +94,97 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
                 }
         }
 
+        // Fused Location
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(requireActivity())
+        prepararLocationCallback()
+
         return view
     }
 
     override fun onMapReady(map: GoogleMap) {
         googleMap = map
-        agregarIconoUbicacion()
+        habilitarMiUbicacionEnMapaSiPermiso()
     }
 
-    private fun agregarIconoUbicacion() {
+    // ====== UBICACIÓN EN TIEMPO REAL ======
+    private fun prepararLocationCallback() {
+        locationCallback = object : LocationCallback() {
+            override fun onLocationResult(result: LocationResult) {
+                val loc = result.lastLocation ?: return
+                ultimaUbicacion = loc
+                actualizarMarcadorUbicacion(LatLng(loc.latitude, loc.longitude))
+            }
+        }
+    }
+
+    private fun crearLocationRequest(): LocationRequest {
+        return LocationRequest.Builder(
+            Priority.PRIORITY_HIGH_ACCURACY, /*intervalMillis*/ 5000L
+        ).setMinUpdateIntervalMillis(2000L)
+            .setWaitForAccurateLocation(false)
+            .build()
+    }
+
+    private fun habilitarMiUbicacionEnMapaSiPermiso() {
+        if (ActivityCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
+            ActivityCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(
+                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
+                REQUEST_LOCATION_PERMISSIONS
+            )
+            return
+        }
+        googleMap.isMyLocationEnabled = true
+        iniciarActualizacionesUbicacion()
+    }
+
+    private fun iniciarActualizacionesUbicacion() {
+        if (!::fusedLocationClient.isInitialized || locationCallback == null) return
+        if (ActivityCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
+            ActivityCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED
+        ) return
+
+        fusedLocationClient.requestLocationUpdates(
+            crearLocationRequest(),
+            locationCallback as LocationCallback,
+            requireActivity().mainLooper
+        )
+
+        // Obtener la última ubicación conocida para centrar rápido el mapa
+        fusedLocationClient.lastLocation.addOnSuccessListener { loc ->
+            loc?.let {
+                ultimaUbicacion = it
+                val here = LatLng(it.latitude, it.longitude)
+                actualizarMarcadorUbicacion(here)
+                googleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(here, 15f))
+            }
+        }
+    }
+
+    private fun detenerActualizacionesUbicacion() {
+        locationCallback?.let { fusedLocationClient.removeLocationUpdates(it) }
+    }
+
+    private fun actualizarMarcadorUbicacion(latLng: LatLng) {
         val icono = BitmapDescriptorFactory.fromBitmap(
             Bitmap.createScaledBitmap(
                 BitmapFactory.decodeResource(resources, R.drawable.ic_persona), 100, 100, false
             )
         )
-        marcadorUbicacion?.remove()
-        marcadorUbicacion = googleMap.addMarker(
-            MarkerOptions().position(ubicacionActual).title("Tú (Ubicación simulada)").icon(icono)
-        )
-        googleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(ubicacionActual, 15f))
+        if (marcadorUbicacion == null) {
+            marcadorUbicacion = googleMap.addMarker(
+                MarkerOptions().position(latLng).title("Tú").icon(icono)
+            )
+            googleMap.animateCamera(CameraUpdateFactory.newLatLngZoom(latLng, 16f))
+        } else {
+            marcadorUbicacion?.position = latLng
+        }
     }
 
-    private fun mostrarMarcadorDestino(latLng: LatLng) {
-        marcadorDestino?.remove()
-        marcadorDestino = googleMap.addMarker(MarkerOptions().position(latLng).title("Destino"))
-        googleMap.animateCamera(CameraUpdateFactory.newLatLngZoom(latLng, 15f))
-    }
-
+    // ====== LÓGICA DE RUTAS (usa ubicación real) ======
     private suspend fun buscarYMostrarCombinacionDeRutas(destino: LatLng) {
+        // Limpiar capas
         marcadorDestino?.remove()
         marcadoresParaderos.forEach { it.remove() }
         polylines.forEach { it.remove() }
@@ -121,11 +193,18 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
         leyendaContainer.removeAllViews()
         leyendaInicialAgregada = false
 
+        val origenLatLng = ultimaUbicacion?.let { LatLng(it.latitude, it.longitude) }
+        if (origenLatLng == null) {
+            Toast.makeText(requireContext(), "No tengo tu ubicación aún. Activa GPS o espera unos segundos.", Toast.LENGTH_LONG).show()
+            mostrarMarcadorDestino(destino)
+            return
+        }
+
         val rutas = rutaRepository.obtenerRutasCompletas()
         Toast.makeText(requireContext(), "Rutas cargadas: ${rutas.size}", Toast.LENGTH_SHORT).show()
 
         val rutasDirectas = rutas.filter { ruta ->
-            ruta.coordenadas.any { c -> distanciaPorCalle(ubicacionActual, LatLng(c.latitud, c.longitud)) < TOLERANCIA_METROS } &&
+            ruta.coordenadas.any { c -> distanciaPorCalle(origenLatLng, LatLng(c.latitud, c.longitud)) < TOLERANCIA_METROS } &&
                     ruta.coordenadas.any { c -> distanciaPorCalle(destino, LatLng(c.latitud, c.longitud)) < TOLERANCIA_METROS }
         }
 
@@ -135,34 +214,14 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
             val ruta = rutasDirectas.first()
             val colorHue = coloresHue[0]
             val colorInt = Color.HSVToColor(floatArrayOf(colorHue, 1f, 1f))
-
-            val coordenadas = ruta.coordenadas.map { LatLng(it.latitud, it.longitud) }
-            for (i in 0 until coordenadas.size - 1) {
-                val tramos = obtenerPolylineaDesdeGoogle(coordenadas[i], coordenadas[i + 1])
-                if (tramos.isEmpty()) {
-                    Log.w("Polylinea", "Sin datos entre ${coordenadas[i]} y ${coordenadas[i+1]}")
-                }
-                polylines.add(googleMap.addPolyline(PolylineOptions().addAll(tramos).width(10f).color(colorInt)))
-            }
-
-            ruta.paraderos.forEach { paradero ->
-                marcadoresParaderos.add(
-                    googleMap.addMarker(
-                        MarkerOptions()
-                            .position(LatLng(paradero.latitud, paradero.longitud))
-                            .title("${paradero.nombre} (${ruta.empresa.nombre})")
-                            .icon(BitmapDescriptorFactory.defaultMarker(colorHue))
-                    )!!
-                )
-            }
-
+            dibujarRutaConColor(ruta, colorHue, colorInt)
             agregarALeyenda(ruta.nombre, ruta.empresa.nombre, colorInt)
             mostrarMarcadorDestino(destino)
             return
         }
 
         val rutasCercaOrigen = rutas.filter {
-            it.coordenadas.any { c -> distanciaPorCalle(ubicacionActual, LatLng(c.latitud, c.longitud)) < TOLERANCIA_METROS }
+            it.coordenadas.any { c -> distanciaPorCalle(origenLatLng, LatLng(c.latitud, c.longitud)) < TOLERANCIA_METROS }
         }
 
         Toast.makeText(requireContext(), "Rutas cerca del origen: ${rutasCercaOrigen.size}", Toast.LENGTH_SHORT).show()
@@ -173,10 +232,8 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
         for (ruta1 in rutasCercaOrigen) {
             for (ruta2 in rutas) {
                 if (ruta1.id == ruta2.id) continue
-
                 if (combinacionesAgregadas.contains(Pair(ruta1.id, ruta2.id)) ||
-                    combinacionesAgregadas.contains(Pair(ruta2.id, ruta1.id))
-                ) continue
+                    combinacionesAgregadas.contains(Pair(ruta2.id, ruta1.id))) continue
 
                 val conectadas = ruta1.coordenadas.any { c1 ->
                     ruta2.coordenadas.any { c2 ->
@@ -199,6 +256,7 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
 
         if (combinacionesValidas.isEmpty()) {
             Toast.makeText(requireContext(), "No se encontraron rutas combinadas válidas", Toast.LENGTH_LONG).show()
+            mostrarMarcadorDestino(destino)
             return
         }
 
@@ -209,32 +267,36 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
             val colorInt1 = Color.HSVToColor(floatArrayOf(colorHue1, 1f, 1f))
             val colorInt2 = Color.HSVToColor(floatArrayOf(colorHue2, 1f, 1f))
 
-            listOf(Triple(ruta1, colorHue1, colorInt1), Triple(ruta2, colorHue2, colorInt2)).forEach { (ruta, colorHue, colorInt) ->
-                val coordenadas = ruta.coordenadas.map { LatLng(it.latitud, it.longitud) }
-                for (i in 0 until coordenadas.size - 1) {
-                    val tramos = obtenerPolylineaDesdeGoogle(coordenadas[i], coordenadas[i + 1])
-                    if (tramos.isEmpty()) {
-                        Log.w("Polylinea", "Sin datos entre ${coordenadas[i]} y ${coordenadas[i+1]}")
-                    }
-                    polylines.add(googleMap.addPolyline(PolylineOptions().addAll(tramos).width(10f).color(colorInt)))
-                }
+            dibujarRutaConColor(ruta1, colorHue1, colorInt1)
+            agregarALeyenda(ruta1.nombre, ruta1.empresa.nombre, colorInt1)
 
-                ruta.paraderos.forEach { paradero ->
-                    marcadoresParaderos.add(
-                        googleMap.addMarker(
-                            MarkerOptions()
-                                .position(LatLng(paradero.latitud, paradero.longitud))
-                                .title("${paradero.nombre} (${ruta.empresa.nombre})")
-                                .icon(BitmapDescriptorFactory.defaultMarker(colorHue))
-                        )!!
-                    )
-                }
-
-                agregarALeyenda(ruta.nombre, ruta.empresa.nombre, colorInt)
-            }
+            dibujarRutaConColor(ruta2, colorHue2, colorInt2)
+            agregarALeyenda(ruta2.nombre, ruta2.empresa.nombre, colorInt2)
         }
 
         mostrarMarcadorDestino(destino)
+    }
+
+    private fun dibujarRutaConColor(ruta: RutaCompleta, colorHue: Float, colorInt: Int) {
+        val coordenadas = ruta.coordenadas.map { LatLng(it.latitud, it.longitud) }
+        for (i in 0 until coordenadas.size - 1) {
+            val tramos = runBlocking(Dispatchers.IO) { obtenerPolylineaDesdeGoogle(coordenadas[i], coordenadas[i + 1]) }
+            if (tramos.isEmpty()) {
+                Log.w("Polylinea", "Sin datos entre ${coordenadas[i]} y ${coordenadas[i+1]}")
+            }
+            polylines.add(googleMap.addPolyline(PolylineOptions().addAll(tramos).width(10f).color(colorInt)))
+        }
+
+        ruta.paraderos.forEach { paradero ->
+            marcadoresParaderos.add(
+                googleMap.addMarker(
+                    MarkerOptions()
+                        .position(LatLng(paradero.latitud, paradero.longitud))
+                        .title("${paradero.nombre} (${ruta.empresa.nombre})")
+                        .icon(BitmapDescriptorFactory.defaultMarker(colorHue))
+                )!!
+            )
+        }
     }
 
     private suspend fun distanciaPorCalle(origen: LatLng, destino: LatLng): Double = withContext(Dispatchers.IO) {
@@ -252,8 +314,9 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
             val json = JSONObject(body)
             val rows = json.getJSONArray("rows")
             val elements = rows.getJSONObject(0).getJSONArray("elements")
-            val distance = elements.getJSONObject(0).getJSONObject("distance").getDouble("value")
-            distance
+            val element0 = elements.getJSONObject(0)
+            if (element0.getString("status") != "OK") return@withContext Double.MAX_VALUE
+            element0.getJSONObject("distance").getDouble("value")
         } catch (e: Exception) {
             e.printStackTrace()
             Double.MAX_VALUE
@@ -262,17 +325,15 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
 
     private suspend fun obtenerPolylineaDesdeGoogle(start: LatLng, end: LatLng): List<LatLng> = withContext(Dispatchers.IO) {
         val url = "https://roads.googleapis.com/v1/snapToRoads?path=${start.latitude},${start.longitude}|${end.latitude},${end.longitude}&interpolate=true&key=$apiKey"
-
         try {
             val client = OkHttpClient()
             val request = Request.Builder().url(url).build()
             val response = client.newCall(request).execute()
             val body = response.body?.string() ?: return@withContext emptyList()
-
             if (!response.isSuccessful) return@withContext emptyList()
 
             val json = JSONObject(body)
-            val snappedPoints = json.getJSONArray("snappedPoints")
+            val snappedPoints = json.optJSONArray("snappedPoints") ?: return@withContext emptyList()
 
             val snappedLatLngs = mutableListOf<LatLng>()
             for (i in 0 until snappedPoints.length()) {
@@ -281,12 +342,17 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
                 val lng = location.getDouble("longitude")
                 snappedLatLngs.add(LatLng(lat, lng))
             }
-
             snappedLatLngs
         } catch (e: Exception) {
             e.printStackTrace()
             emptyList()
         }
+    }
+
+    private fun mostrarMarcadorDestino(latLng: LatLng) {
+        marcadorDestino?.remove()
+        marcadorDestino = googleMap.addMarker(MarkerOptions().position(latLng).title("Destino"))
+        googleMap.animateCamera(CameraUpdateFactory.newLatLngZoom(latLng, 15f))
     }
 
     private fun agregarALeyenda(nombreRuta: String, empresa: String, color: Int) {
@@ -328,24 +394,40 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
         leyendaContainer.addView(container)
     }
 
+    // ====== Ciclo de vida ======
     override fun onResume() {
         super.onResume()
         mapView.onResume()
+        habilitarMiUbicacionEnMapaSiPermiso()
     }
 
     override fun onPause() {
         super.onPause()
         mapView.onPause()
+        detenerActualizacionesUbicacion()
     }
 
     override fun onDestroy() {
         super.onDestroy()
         mapView.onDestroy()
+        detenerActualizacionesUbicacion()
     }
 
     override fun onLowMemory() {
         super.onLowMemory()
         mapView.onLowMemory()
+    }
+
+    // Permisos
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_LOCATION_PERMISSIONS) {
+            if (grantResults.isNotEmpty() && grantResults.any { it == PackageManager.PERMISSION_GRANTED }) {
+                habilitarMiUbicacionEnMapaSiPermiso()
+            } else {
+                Toast.makeText(requireContext(), "Permisos de ubicación denegados", Toast.LENGTH_LONG).show()
+            }
+        }
     }
 }
 
