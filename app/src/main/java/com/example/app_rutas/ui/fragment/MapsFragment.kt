@@ -19,6 +19,7 @@ import android.widget.Toast
 import androidx.core.app.ActivityCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
+import androidx.lifecycle.lifecycleScope
 import com.example.app_rutas.R
 import com.example.app_rutas.domain.usecases.ObtenerParaderoCercanoUseCase
 import com.example.app_rutas.infrastructure.repositories.InformacionRepositoryImpl
@@ -33,12 +34,10 @@ import com.google.android.gms.location.*
 import com.google.android.gms.maps.*
 import com.google.android.gms.maps.model.*
 import com.google.android.material.bottomsheet.BottomSheetBehavior
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
+import kotlinx.coroutines.Dispatchers.Main
+import kotlinx.coroutines.Dispatchers.IO
+import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -82,10 +81,9 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
     private val BUS_SNAP_MAX_METERS = 60.0
 
     // ====== NUEVO: ETA ======
-    private var velocidadBusKmh: Double? = null        // última velocidad reportada por Firebase
-    private var etaJob: Job? = null                    // loop de 1 minuto para recalcular ETA
-    private val ETA_RECALC_MS = 60_000L                // cada 1 minuto
-    // ========================
+    private var velocidadBusKmh: Double? = null
+    private var etaJob: Job? = null
+    private val ETA_RECALC_MS = 60_000L
 
     private val paraderoViewModel: ParaderoViewModel by viewModels {
         ParaderoViewModelFactory(ObtenerParaderoCercanoUseCase(ParaderoRepositoryImpl()))
@@ -104,6 +102,10 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
     private var ultimoDestino: LatLng? = null
     private var ultimaPeticionTs: Long = 0L
     private val MIN_DIRECTIONS_INTERVAL_MS = 15_000L
+
+    // ====== NUEVO: Jobs para cancelar en onDestroyView ======
+    private var directionsJob: Job? = null
+    private var snapJob: Job? = null
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View =
         inflater.inflate(R.layout.fragment_maps, container, false)
@@ -157,19 +159,17 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
                         destino.latitude, destino.longitude, distancia
                     )
 
-                    // ---- NUEVO: control de 10 m para ocultar marcador y ruta ----
+                    // ---- control de 10 m para ocultar marcador y ruta ----
                     if (distancia[0] <= 10f) {
                         ocultarUsuarioPorProximidad = true
-                        // borra línea roja y oculta marcador de usuario
                         ultimaRutaHastaParadero?.remove()
                         ultimaRutaHastaParadero = null
                         marcadorUsuario?.remove()
                         marcadorUsuario = null
                     } else {
                         ocultarUsuarioPorProximidad = false
-                        // HISTERESIS: si te alejas >20 m, vuelve a trazar; entre 10 y 20 m mantén limpio
                         if (distancia[0] > 20f) {
-                            trazarRutaHastaParadero(origen, destino) // <<--- MISMA FUNCIÓN, ahora con calles
+                            trazarRutaHastaParadero(origen, destino) // calles
                         } else {
                             ultimaRutaHastaParadero?.remove()
                             ultimaRutaHastaParadero = null
@@ -177,7 +177,6 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
                     }
                 }
 
-                // Actualiza tu marker solo si no estamos ocultando por proximidad
                 if (!ocultarUsuarioPorProximidad) {
                     actualizarUbicacionEnMapa(location)
                 }
@@ -201,10 +200,9 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
             val lat = pos?.latitud ?: return@observe
             val lng = pos.longitud ?: return@observe
             val vel = pos.velocidad
-            velocidadBusKmh = vel  // ====== NUEVO: guardar última velocidad del Firebase ======
+            velocidadBusKmh = vel
             val posCruda = LatLng(lat, lng)
 
-            // Por defecto usamos la lectura cruda; si la ruta está cargada, probamos “snap”
             var destino = posCruda
             if (rutaActualLatLngs.size >= 2) {
                 val (puntoSnap, distM) = closestPointOnPath(posCruda, rutaActualLatLngs)
@@ -212,7 +210,7 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
             }
 
             if (marcadorBusSuperStar == null) {
-                val icon = getScaledMarkerIcon(R.drawable.ic_bus, 90, 90) // tu drawable del bus
+                val icon = getScaledMarkerIcon(R.drawable.ic_bus, 90, 90)
                 marcadorBusSuperStar = googleMap.addMarker(
                     MarkerOptions()
                         .position(destino)
@@ -230,7 +228,6 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
                 ultimaPosBus = destino
             }
 
-            // ====== NUEVO: si ya hay paradero seleccionado, refrescar ETA inmediatamente ======
             if (paraderoActual != null) {
                 actualizarEtaYUi(mostrarToast = false)
             }
@@ -257,18 +254,20 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
     }
 
     private fun obtenerUbicacion() {
-        if (rutaSeleccionadaActual == null) {
-            Toast.makeText(requireContext(), "Primero selecciona una ruta", Toast.LENGTH_SHORT).show()
+        val ctx = context ?: return
+        val rutaSel = rutaSeleccionadaActual
+        if (rutaSel == null) {
+            Toast.makeText(ctx, "Primero selecciona una ruta", Toast.LENGTH_SHORT).show()
             return
         }
-        if (ActivityCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+        if (ActivityCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(requireActivity(), arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 1)
             return
         }
         fusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
             location?.let {
-                paraderoViewModel.obtenerParaderoMasCercano(it.latitude, it.longitude, rutaSeleccionadaActual!!.id)
-            } ?: Toast.makeText(requireContext(), "Ubicación no disponible", Toast.LENGTH_SHORT).show()
+                paraderoViewModel.obtenerParaderoMasCercano(it.latitude, it.longitude, rutaSel.id)
+            } ?: run { Toast.makeText(ctx, "Ubicación no disponible", Toast.LENGTH_SHORT).show() }
         }
     }
 
@@ -285,7 +284,7 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
             googleMap.animateCamera(CameraUpdateFactory.newLatLngZoom(latLng, 17f))
             paraderoActual = it
 
-            // ====== NUEVO: inicia/renueva el loop de ETA ======
+            // inicia/renueva el loop de ETA
             startEtaLoop()
         }
     }
@@ -298,14 +297,15 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
     }
 
     private fun configurarDropdown(rutas: List<Ruta>) {
-        val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, rutas)
+        val ctx = context ?: return
+        val adapter = ArrayAdapter(ctx, android.R.layout.simple_dropdown_item_1line, rutas)
         dropdownRutas.setAdapter(adapter)
 
         dropdownRutas.setOnItemClickListener { _, _, position, _ ->
             val rutaSeleccionada = rutas[position]
             bottomSheetBehavior.state = BottomSheetBehavior.STATE_HIDDEN
 
-            // ====== NUEVO: al cambiar de ruta, limpiar ETA/paradero ======
+            // al cambiar de ruta, limpiar ETA/paradero
             stopEtaLoop()
             paraderoActual = null
 
@@ -330,7 +330,7 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
 
             if (empresaTieneGPS(rutaSeleccionada.empresa)) {
                 busViewModel.start(path = "ubicacion") { msg ->
-                    Toast.makeText(requireContext(), "Firebase: $msg", Toast.LENGTH_SHORT).show()
+                    context?.let { Toast.makeText(it, "Firebase: $msg", Toast.LENGTH_SHORT).show() }
                 }
             } else {
                 busViewModel.stop()
@@ -339,7 +339,7 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
     }
 
     private fun actualizarUbicacionEnMapa(location: Location) {
-        if (ocultarUsuarioPorProximidad) return  // NUEVO: respeta proximidad
+        if (ocultarUsuarioPorProximidad) return
         if (!isAdded || context == null || view == null) return
         val latLng = LatLng(location.latitude, location.longitude)
         marcadorUsuario?.remove()
@@ -371,59 +371,54 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
         ultimoOrigen = origen
         ultimoDestino = destino
 
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val client = OkHttpClient()
-                val url: HttpUrl = HttpUrl.Builder()
-                    .scheme("https")
-                    .host("maps.googleapis.com")
-                    .addPathSegment("maps")
-                    .addPathSegment("api")
-                    .addPathSegment("directions")
-                    .addPathSegment("json")
-                    .addQueryParameter("origin", "${origen.latitude},${origen.longitude}")
-                    .addQueryParameter("destination", "${destino.latitude},${destino.longitude}")
-                    .addQueryParameter("mode", mode) // "walking" o "driving"
-                    .addQueryParameter("key", apiKey)
-                    .build()
+        directionsJob?.cancel()
+        directionsJob = viewLifecycleOwner.lifecycleScope.launch {
+            val puntos: List<LatLng>? = withContext(IO) {
+                try {
+                    val client = OkHttpClient()
+                    val url: HttpUrl = HttpUrl.Builder()
+                        .scheme("https")
+                        .host("maps.googleapis.com")
+                        .addPathSegment("maps")
+                        .addPathSegment("api")
+                        .addPathSegment("directions")
+                        .addPathSegment("json")
+                        .addQueryParameter("origin", "${origen.latitude},${origen.longitude}")
+                        .addQueryParameter("destination", "${destino.latitude},${destino.longitude}")
+                        .addQueryParameter("mode", mode)
+                        .addQueryParameter("key", apiKey)
+                        .build()
 
-                val request = Request.Builder().url(url).build()
-                val response = client.newCall(request).execute()
-                val body = response.body?.string()
+                    val request = Request.Builder().url(url).build()
+                    val response = client.newCall(request).execute()
+                    val body = response.body?.string()
 
-                if (!response.isSuccessful || body.isNullOrEmpty()) {
-                    launch(Dispatchers.Main) { dibujarLineaRecta(origen, destino) }
-                    return@launch
+                    if (!response.isSuccessful || body.isNullOrEmpty()) return@withContext null
+
+                    val json = JSONObject(body)
+                    val routes = json.optJSONArray("routes") ?: return@withContext null
+                    if (routes.length() == 0) return@withContext null
+
+                    val overview = routes.getJSONObject(0).getJSONObject("overview_polyline").getString("points")
+                    decodePolyline(overview)
+                } catch (_: Exception) {
+                    null
                 }
+            }
 
-                val json = JSONObject(body)
-                val routes = json.optJSONArray("routes")
-                if (routes == null || routes.length() == 0) {
-                    launch(Dispatchers.Main) { dibujarLineaRecta(origen, destino) }
-                    return@launch
-                }
+            if (!isAdded || view == null) return@launch
 
-                val route0 = routes.getJSONObject(0)
-                val overview = route0.getJSONObject("overview_polyline").getString("points")
-                val puntos = decodePolyline(overview)
-
-                launch(Dispatchers.Main) {
-                    // Limpia polyline anterior
-                    ultimaRutaHastaParadero?.remove()
-
-                    // Dibuja la ruta por calles en rojo (igual que tenías)
-                    ultimaRutaHastaParadero = googleMap.addPolyline(
-                        PolylineOptions()
-                            .addAll(puntos)
-                            .color(android.graphics.Color.RED)
-                            .width(8f)
-                    )
-                }
-            } catch (_: Exception) {
-                launch(Dispatchers.Main) {
-                    dibujarLineaRecta(origen, destino)
-                    Toast.makeText(requireContext(), "No se pudo obtener la ruta por calles. Línea directa temporal.", Toast.LENGTH_SHORT).show()
-                }
+            if (puntos.isNullOrEmpty()) {
+                dibujarLineaRecta(origen, destino)
+                context?.let { Toast.makeText(it, "No se pudo obtener la ruta por calles. Línea directa temporal.", Toast.LENGTH_SHORT).show() }
+            } else {
+                ultimaRutaHastaParadero?.remove()
+                ultimaRutaHastaParadero = googleMap.addPolyline(
+                    PolylineOptions()
+                        .addAll(puntos)
+                        .color(android.graphics.Color.RED)
+                        .width(8f)
+                )
             }
         }
     }
@@ -438,7 +433,7 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
         )
     }
 
-    // ================== REEMPLAZADA: Snap to Roads por bloques (≤100) ==================
+    // ================== Snap to Roads por bloques (≤100) ==================
     private fun snapToRoadsYMostrarRuta(coordenadas: List<Coordenada>) {
         if (coordenadas.isEmpty()) return
 
@@ -465,84 +460,87 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
             return chunks
         }
 
-        CoroutineScope(Dispatchers.IO).launch {
-            val client = OkHttpClient()
-            val snappedLatLngsGlobal = mutableListOf<LatLng>()
-            var anyChunkFailed = false
+        snapJob?.cancel()
+        snapJob = viewLifecycleOwner.lifecycleScope.launch {
+            val (snappedLatLngsGlobal, anyChunkFailed) = withContext(IO) {
+                val client = OkHttpClient()
+                val snapped = mutableListOf<LatLng>()
+                var failed = false
 
-            val bloques = chunkedWithOverlap(validas, MAX_POINTS, OVERLAP)
-            for ((idx, bloque) in bloques.withIndex()) {
-                val pathParam = bloque.joinToString("|") { "${it.latitud},${it.longitud}" }
+                val bloques = chunkedWithOverlap(validas, MAX_POINTS, OVERLAP)
+                for ((idx, bloque) in bloques.withIndex()) {
+                    val pathParam = bloque.joinToString("|") { "${it.latitud},${it.longitud}" }
 
-                val httpUrl: HttpUrl = HttpUrl.Builder()
-                    .scheme("https")
-                    .host("roads.googleapis.com")
-                    .addPathSegment("v1")
-                    .addPathSegment("snapToRoads")
-                    .addQueryParameter("path", pathParam)
-                    .addQueryParameter("interpolate", "true")
-                    .addQueryParameter("key", apiKey)
-                    .build()
+                    val httpUrl: HttpUrl = HttpUrl.Builder()
+                        .scheme("https")
+                        .host("roads.googleapis.com")
+                        .addPathSegment("v1")
+                        .addPathSegment("snapToRoads")
+                        .addQueryParameter("path", pathParam)
+                        .addQueryParameter("interpolate", "true")
+                        .addQueryParameter("key", apiKey)
+                        .build()
 
-                val request = Request.Builder().url(httpUrl).build()
+                    val request = Request.Builder().url(httpUrl).build()
 
-                try {
-                    val response = client.newCall(request).execute()
-                    val bodyStr = response.body?.string()
+                    try {
+                        val response = client.newCall(request).execute()
+                        val bodyStr = response.body?.string()
 
-                    if (!response.isSuccessful || bodyStr.isNullOrEmpty()) {
-                        anyChunkFailed = true
-                        continue
+                        if (!response.isSuccessful || bodyStr.isNullOrEmpty()) {
+                            failed = true
+                            continue
+                        }
+
+                        val json = JSONObject(bodyStr)
+                        val snappedPoints = json.optJSONArray("snappedPoints") ?: continue
+
+                        val partial = mutableListOf<LatLng>()
+                        for (i in 0 until snappedPoints.length()) {
+                            val loc = snappedPoints.getJSONObject(i).getJSONObject("location")
+                            partial.add(LatLng(loc.getDouble("latitude"), loc.getDouble("longitude")))
+                        }
+
+                        // Quita duplicado por solape
+                        if (idx > 0 && partial.isNotEmpty()) partial.removeAt(0)
+                        snapped.addAll(partial)
+
+                        // delay(100) // opcional si hay límites de QPS
+                    } catch (_: Exception) {
+                        failed = true
                     }
-
-                    val json = JSONObject(bodyStr)
-                    val snappedPoints = json.optJSONArray("snappedPoints") ?: continue
-
-                    val partial = mutableListOf<LatLng>()
-                    for (i in 0 until snappedPoints.length()) {
-                        val loc = snappedPoints.getJSONObject(i).getJSONObject("location")
-                        partial.add(LatLng(loc.getDouble("latitude"), loc.getDouble("longitude")))
-                    }
-
-                    // Quita duplicado por solape
-                    if (idx > 0 && partial.isNotEmpty()) partial.removeAt(0)
-
-                    snappedLatLngsGlobal.addAll(partial)
-
-                    // (Opcional) suavizar QPS
-                    // delay(100)
-                } catch (_: Exception) {
-                    anyChunkFailed = true
                 }
+
+                Pair(snapped, failed)
             }
 
-            launch(Dispatchers.Main) {
-                val puntosParaDibujar: List<LatLng> =
-                    if (snappedLatLngsGlobal.isNotEmpty()) snappedLatLngsGlobal
-                    else validas.map { LatLng(it.latitud, it.longitud) } // Fallback “crudo” si todo falló
+            if (!isAdded || view == null) return@launch
 
-                // Dibuja polilínea
-                googleMap.addPolyline(
-                    PolylineOptions()
-                        .addAll(puntosParaDibujar)
-                        .color(android.graphics.Color.BLUE)
-                        .width(10f)
-                )
+            val puntosParaDibujar: List<LatLng> =
+                if (snappedLatLngsGlobal.isNotEmpty()) snappedLatLngsGlobal
+                else validas.map { LatLng(it.latitud, it.longitud) } // Fallback crudo
 
-                // Guarda para pegado del bus y ETA
-                rutaActualLatLngs = puntosParaDibujar
+            // Dibuja polilínea
+            googleMap.addPolyline(
+                PolylineOptions()
+                    .addAll(puntosParaDibujar)
+                    .color(android.graphics.Color.BLUE)
+                    .width(10f)
+            )
 
-                // Enfocar cámara
-                if (puntosParaDibujar.isNotEmpty()) {
-                    val bounds = LatLngBounds.builder().apply { puntosParaDibujar.forEach { include(it) } }.build()
-                    googleMap.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, 100))
-                }
+            // Guarda para pegado del bus y ETA
+            rutaActualLatLngs = puntosParaDibujar
 
-                if (anyChunkFailed && snappedLatLngsGlobal.isNotEmpty()) {
-                    Toast.makeText(requireContext(), "Algunos tramos no se ajustaron a la vía.", Toast.LENGTH_SHORT).show()
-                } else if (anyChunkFailed && snappedLatLngsGlobal.isEmpty()) {
-                    Toast.makeText(requireContext(), "No se pudo usar Snap to Roads; se dibujó la ruta cruda.", Toast.LENGTH_SHORT).show()
-                }
+            // Enfocar cámara
+            if (puntosParaDibujar.isNotEmpty()) {
+                val bounds = LatLngBounds.builder().apply { puntosParaDibujar.forEach { include(it) } }.build()
+                googleMap.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, 100))
+            }
+
+            if (anyChunkFailed && snappedLatLngsGlobal.isNotEmpty()) {
+                context?.let { Toast.makeText(it, "Algunos tramos no se ajustaron a la vía.", Toast.LENGTH_SHORT).show() }
+            } else if (anyChunkFailed && snappedLatLngsGlobal.isEmpty()) {
+                context?.let { Toast.makeText(it, "No se pudo usar Snap to Roads; se dibujó la ruta cruda.", Toast.LENGTH_SHORT).show() }
             }
         }
     }
@@ -591,17 +589,26 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
 
     override fun onDestroyView() {
         super.onDestroyView()
+        try {
+            fusedLocationClient.removeLocationUpdates(locationCallback)
+        } catch (_: Exception) { /* no-op */ }
+
         busAnimator?.cancel()
         busAnimator = null
         busViewModel.stop()
         marcadorBusSuperStar = null
         ultimaPosBus = null
+
+        directionsJob?.cancel()
+        directionsJob = null
+        snapJob?.cancel()
+        snapJob = null
+
         rutaActualLatLngs = emptyList()
         stopEtaLoop()
     }
 
     // ===================== GEOMETRÍA (pegado a polilínea) =====================
-    // Proyecta 'p' al punto más cercano sobre la polilínea 'path' (devuelve punto y distancia en metros)
     private fun closestPointOnPath(p: LatLng, path: List<LatLng>): Pair<LatLng, Double> {
         if (path.size < 2) return p to Double.POSITIVE_INFINITY
 
@@ -620,18 +627,15 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
         return bestPoint to bestDist
     }
 
-    // Punto más cercano de 'p' al segmento [a,b], usando proyección equirectangular local (metros)
     private fun closestPointOnSegmentMeters(p: LatLng, a: LatLng, b: LatLng): Pair<LatLng, Double> {
         val R = 6371000.0
         val deg2rad = Math.PI / 180.0
         val latRef = (a.latitude + b.latitude) / 2.0
         val cosRef = cos(latRef * deg2rad)
 
-        // Vector AB en metros
         val dx = (b.longitude - a.longitude) * deg2rad * R * cosRef
         val dy = (b.latitude - a.latitude) * deg2rad * R
 
-        // Vector AP en metros
         val px = (p.longitude - a.longitude) * deg2rad * R * cosRef
         val py = (p.latitude - a.latitude) * deg2rad * R
 
@@ -659,11 +663,11 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
 
     // ===================== ETA SOBRE TU POLILÍNEA ============================
     private data class Proj(
-        val index: Int,          // índice del segmento [i, i+1]
-        val point: LatLng,       // punto proyectado sobre el segmento
-        val t: Double,           // posición relativa dentro del segmento (0..1)
-        val segLen: Double,      // longitud del segmento en m
-        val offDist: Double      // distancia de p al segmento (m)
+        val index: Int,
+        val point: LatLng,
+        val t: Double,
+        val segLen: Double,
+        val offDist: Double
     )
 
     private fun projectOnPathWithIndex(p: LatLng, path: List<LatLng>): Proj? {
@@ -681,7 +685,6 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
 
     private data class ProjRaw(val point: LatLng, val t: Double, val segLen: Double, val offDist: Double)
 
-    // Proyección con parámetro t y longitudes en metros
     private fun projectOnSegmentWithT(p: LatLng, a: LatLng, b: LatLng): ProjRaw {
         val R = 6371000.0
         val deg2rad = Math.PI / 180.0
@@ -722,7 +725,6 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
         return hypot(dx, dy)
     }
 
-    // Distancia mínima sobre la polilínea entre dos puntos proyectados
     private fun distanceAlongPath(from: Proj, to: Proj, path: List<LatLng>): Double {
         if (path.size < 2) return Double.NaN
 
@@ -737,7 +739,6 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
                 d += b.t * b.segLen
                 d
             } else {
-                // invertido
                 var d = a.t * a.segLen
                 for (i in a.index - 1 downTo b.index + 1) {
                     d += segLenMeters(path[i], path[i - 1])
@@ -746,7 +747,6 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
                 d
             }
         }
-        // Toma el menor (por si el bus va “al revés” y la ruta hace curvas)
         val d1 = forward(from, to)
         val d2 = forward(to, from)
         return kotlin.math.min(d1, d2)
@@ -765,11 +765,10 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
 
     // ====== LOOP de ETA cada minuto + refrescos puntuales ======
     private fun startEtaLoop() {
-        // cálculo inmediato y toast inicial
         actualizarEtaYUi(mostrarToast = true)
 
         etaJob?.cancel()
-        etaJob = CoroutineScope(Dispatchers.Main).launch {
+        etaJob = viewLifecycleOwner.lifecycleScope.launch {
             while (isActive && paraderoActual != null) {
                 delay(ETA_RECALC_MS)
                 actualizarEtaYUi(mostrarToast = false)
@@ -786,13 +785,11 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
         val bus = marcadorBusSuperStar?.position ?: return
         val parada = paraderoActual ?: return
 
-        // 1) Proyectar bus y paradero a la polilínea
         val distMetros: Double = if (rutaActualLatLngs.size >= 2) {
             val from = projectOnPathWithIndex(bus, rutaActualLatLngs) ?: return
             val to = projectOnPathWithIndex(LatLng(parada.latitud, parada.longitud), rutaActualLatLngs) ?: return
             distanceAlongPath(from, to, rutaActualLatLngs)
         } else {
-            // Fallback: distancia recta si no hay polilínea
             val out = FloatArray(1)
             Location.distanceBetween(
                 bus.latitude, bus.longitude,
@@ -801,11 +798,10 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
             out[0].toDouble()
         }
 
-        // 2) Velocidad en m/s (Firebase en km/h). Fallback si no hay dato fiable.
         val vKmh = velocidadBusKmh
         val speedMps = when {
             vKmh != null && vKmh > 3.0 -> (vKmh * 1000.0) / 3600.0
-            else -> 30.0 * 1000.0 / 3600.0  // ~30 km/h por defecto
+            else -> 30.0 * 1000.0 / 3600.0
         }
 
         val etaSec = kotlin.math.max(1.0, distMetros / speedMps).toLong()
@@ -820,7 +816,7 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
         }
 
         if (mostrarToast) {
-            Toast.makeText(requireContext(), "ETA al paradero: $etaStr (dist: $distStr)", Toast.LENGTH_SHORT).show()
+            context?.let { Toast.makeText(it, "ETA al paradero: $etaStr (dist: $distStr)", Toast.LENGTH_SHORT).show() }
         }
     }
     // ===========================================================

@@ -39,13 +39,6 @@ class NotificationsAdapter : RecyclerView.Adapter<NotificationsAdapter.VH>() {
         h.tvMessage.text = n.message ?: ""
         h.tvDate.text = (n.createdAt ?: "").replace('T', ' ').take(16)
 
-        val stripeColor = when (n.type?.lowercase()) {
-            "error" -> 0xFFF44336.toInt()
-            "warn", "warning", "alert" -> 0xFFFFB300.toInt()
-            else -> 0xFF1E88E5.toInt()
-        }
-        h.viewStripe.setBackgroundColor(stripeColor)
-
         val unread = (n.isRead == false)
         h.viewUnreadDot.visibility = if (unread) View.VISIBLE else View.GONE
         h.tvTitle.setTypeface(h.tvTitle.typeface, if (unread) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)

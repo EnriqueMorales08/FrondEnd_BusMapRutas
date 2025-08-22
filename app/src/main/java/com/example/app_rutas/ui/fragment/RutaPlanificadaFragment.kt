@@ -13,6 +13,7 @@ import androidx.fragment.app.Fragment
 import com.example.app_rutas.R
 import com.example.app_rutas.infrastructure.repositories.RutaRepositoryImpl
 import com.example.app_rutas.model.RutaCompleta
+import com.example.app_rutas.ui.activity.MainActivity
 import com.example.app_rutas.ui.adapters.PlacesAutoCompleteAdapter
 import com.google.android.gms.location.*
 import com.google.android.gms.maps.*
@@ -59,8 +60,16 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
 
     private val REQUEST_LOCATION_PERMISSIONS = 1001
 
+    // Si el usuario elige destino antes de que el mapa esté listo
+    private var destinoPendiente: LatLng? = null
+
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         val view = inflater.inflate(R.layout.fragment_ruta_planificada, container, false)
+
+        view.findViewById<ImageButton>(R.id.btnMenu).setOnClickListener {
+            (activity as? MainActivity)?.toggleDrawer()
+        }
+
         etDestino = view.findViewById(R.id.etDestino)
         mapView = view.findViewById(R.id.mapView)
         leyendaContainer = view.findViewById(R.id.leyendaContainer)
@@ -83,6 +92,12 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
             placesClient.fetchPlace(request)
                 .addOnSuccessListener { response ->
                     response.place.latLng?.let { destinoLatLng ->
+                        // Si el mapa aún no está listo, guardamos y procesamos luego
+                        if (!::googleMap.isInitialized) {
+                            destinoPendiente = destinoLatLng
+                            Toast.makeText(requireContext(), "Cargando mapa… procesaré tu destino en un instante", Toast.LENGTH_SHORT).show()
+                            return@addOnSuccessListener
+                        }
                         mostrarMarcadorDestino(destinoLatLng)
                         CoroutineScope(Dispatchers.Main).launch {
                             buscarYMostrarCombinacionDeRutas(destinoLatLng)
@@ -104,6 +119,15 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
     override fun onMapReady(map: GoogleMap) {
         googleMap = map
         habilitarMiUbicacionEnMapaSiPermiso()
+
+        // Si había un destino elegido antes de que el mapa estuviera listo, procésalo ahora
+        destinoPendiente?.let { latLng ->
+            mostrarMarcadorDestino(latLng)
+            CoroutineScope(Dispatchers.Main).launch {
+                buscarYMostrarCombinacionDeRutas(latLng)
+            }
+            destinoPendiente = null
+        }
     }
 
     // ====== UBICACIÓN EN TIEMPO REAL ======
@@ -126,6 +150,9 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
     }
 
     private fun habilitarMiUbicacionEnMapaSiPermiso() {
+        // Si el mapa aún no está listo, no hagas nada
+        if (!::googleMap.isInitialized) return
+
         if (ActivityCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
             ActivityCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED
         ) {
@@ -157,7 +184,9 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
                 ultimaUbicacion = it
                 val here = LatLng(it.latitude, it.longitude)
                 actualizarMarcadorUbicacion(here)
-                googleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(here, 15f))
+                if (::googleMap.isInitialized) {
+                    googleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(here, 15f))
+                }
             }
         }
     }
@@ -167,6 +196,7 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
     }
 
     private fun actualizarMarcadorUbicacion(latLng: LatLng) {
+        if (!::googleMap.isInitialized) return
         val icono = BitmapDescriptorFactory.fromBitmap(
             Bitmap.createScaledBitmap(
                 BitmapFactory.decodeResource(resources, R.drawable.ic_persona), 100, 100, false
@@ -184,6 +214,8 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
 
     // ====== LÓGICA DE RUTAS (usa ubicación real) ======
     private suspend fun buscarYMostrarCombinacionDeRutas(destino: LatLng) {
+        if (!::googleMap.isInitialized) return
+
         // Limpiar capas
         marcadorDestino?.remove()
         marcadoresParaderos.forEach { it.remove() }
@@ -278,6 +310,7 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
     }
 
     private fun dibujarRutaConColor(ruta: RutaCompleta, colorHue: Float, colorInt: Int) {
+        if (!::googleMap.isInitialized) return
         val coordenadas = ruta.coordenadas.map { LatLng(it.latitud, it.longitud) }
         for (i in 0 until coordenadas.size - 1) {
             val tramos = runBlocking(Dispatchers.IO) { obtenerPolylineaDesdeGoogle(coordenadas[i], coordenadas[i + 1]) }
@@ -350,6 +383,7 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
     }
 
     private fun mostrarMarcadorDestino(latLng: LatLng) {
+        if (!::googleMap.isInitialized) return
         marcadorDestino?.remove()
         marcadorDestino = googleMap.addMarker(MarkerOptions().position(latLng).title("Destino"))
         googleMap.animateCamera(CameraUpdateFactory.newLatLngZoom(latLng, 15f))
@@ -398,7 +432,10 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
     override fun onResume() {
         super.onResume()
         mapView.onResume()
-        habilitarMiUbicacionEnMapaSiPermiso()
+        // Solo habilita ubicación si el mapa ya está inicializado
+        if (::googleMap.isInitialized) {
+            habilitarMiUbicacionEnMapaSiPermiso()
+        }
     }
 
     override fun onPause() {
@@ -407,8 +444,8 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
         detenerActualizacionesUbicacion()
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
+    override fun onDestroyView() {
+        super.onDestroyView()
         mapView.onDestroy()
         detenerActualizacionesUbicacion()
     }
@@ -423,11 +460,13 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQUEST_LOCATION_PERMISSIONS) {
             if (grantResults.isNotEmpty() && grantResults.any { it == PackageManager.PERMISSION_GRANTED }) {
-                habilitarMiUbicacionEnMapaSiPermiso()
+                // Solo intenta habilitar si el mapa ya está listo
+                if (::googleMap.isInitialized) {
+                    habilitarMiUbicacionEnMapaSiPermiso()
+                }
             } else {
                 Toast.makeText(requireContext(), "Permisos de ubicación denegados", Toast.LENGTH_LONG).show()
             }
         }
     }
 }
-

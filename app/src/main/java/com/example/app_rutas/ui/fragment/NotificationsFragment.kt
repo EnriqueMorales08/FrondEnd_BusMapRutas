@@ -18,6 +18,7 @@ import com.example.app_rutas.ui.activity.MainActivity
 import com.example.app_rutas.ui.adapters.NotificationsAdapter
 import com.example.app_rutas.ui.notifications.NotificationDetailBottomSheet
 import kotlinx.coroutines.launch
+import android.widget.ImageButton
 
 class NotificationsFragment : Fragment() {
 
@@ -30,6 +31,11 @@ class NotificationsFragment : Fragment() {
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         val v = inflater.inflate(R.layout.fragment_notifications, container, false)
+
+        v.findViewById<ImageButton>(R.id.btnMenu).setOnClickListener {
+            (activity as? MainActivity)?.toggleDrawer()
+        }
+
         swipe = v.findViewById(R.id.swipe)
         rv = v.findViewById(R.id.rvNotifications)
         tvEmpty = v.findViewById(R.id.tvEmpty)

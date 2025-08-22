@@ -5,15 +5,35 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <AutoCompleteTextView
-        android:id="@+id/etDestino"
+    <LinearLayout
+        android:id="@+id/topRow"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="Ingresa tu destino"
-        android:inputType="text"
-        android:padding="12dp"
-        android:background="@drawable/rounded_edittext"
-        android:dropDownHeight="200dp"/>
+        android:orientation="horizontal"
+        android:padding="16dp">
+
+        <ImageButton
+            android:id="@+id/btnMenu"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/bg_round_orange"
+            android:backgroundTint="@null"
+            android:foreground="?attr/selectableItemBackgroundBorderless"
+            android:padding="12dp"
+            android:src="@drawable/ic_menu_24"/>
+
+        <AutoCompleteTextView
+            android:id="@+id/etDestino"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_weight="1"
+            android:hint="Ingresa tu destino"
+            android:inputType="text"
+            android:padding="12dp"
+            android:background="@drawable/rounded_edittext"
+            android:dropDownHeight="200dp"/>
+    </LinearLayout>
 
     <com.google.android.gms.maps.MapView
         android:id="@+id/mapView"
@@ -32,6 +52,5 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:padding="12dp"/>
-
     </ScrollView>
 </LinearLayout>

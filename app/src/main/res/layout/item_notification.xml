@@ -9,18 +9,22 @@
     android:focusable="true"
     android:foreground="?attr/selectableItemBackground"
     app:cardUseCompatPadding="true"
-    app:cardElevation="2dp">
+    app:cardElevation="3dp"
+    app:cardCornerRadius="12dp"
+    app:strokeColor="#26000000"
+    app:strokeWidth="1dp">
 
     <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal">
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal">
 
-        <View
-            android:id="@+id/viewStripe"
-            android:layout_width="6dp"
-            android:layout_height="match_parent"
-            android:background="#90CAF9"/>
+    <!-- Franja izquierda con mismo radio -->
+    <View
+        android:id="@+id/viewStripe"
+        android:layout_width="8dp"
+        android:layout_height="match_parent"
+        android:background="@drawable/stripe_orange_rounded"/>
 
         <LinearLayout
             android:layout_width="0dp"
@@ -47,6 +51,7 @@
                     android:maxLines="1"
                     android:ellipsize="end"/>
 
+                <!-- Punto rojo no leído -->
                 <View
                     android:id="@+id/viewUnreadDot"
                     android:layout_width="8dp"
@@ -64,7 +69,9 @@
                 android:text="Mensaje de notificación"
                 android:textSize="14sp"
                 android:textColor="#99000000"
-                android:layout_marginTop="4dp"/>
+                android:layout_marginTop="4dp"
+                android:maxLines="3"
+                android:ellipsize="end"/>
 
             <TextView
                 android:id="@+id/tvDate"
