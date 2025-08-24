@@ -16,7 +16,7 @@ import org.json.JSONObject
 class RutaRepositoryImpl : RutaRepository {
 
     private val client = OkHttpClient()
-    private val backendUrl = "http://137.184.200.155:9090/api/rutas"
+    private val backendUrl = "http://192.168.101.9:8080/api/rutas"
 
     override suspend fun obtenerCoordenadasDeRuta(rutaId: Long): List<Coordenada> = withContext(Dispatchers.IO) {
         val url = "$backendUrl/$rutaId/coordenadas"
