@@ -2,6 +2,7 @@ package com.example.app_rutas.ui.fragment
 
 import android.Manifest
 import android.animation.ValueAnimator
+import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -46,6 +47,7 @@ import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
+import com.example.app_rutas.infrastructure.telemetry.TelemetryTracker
 
 class MapsFragment : Fragment(), OnMapReadyCallback {
 
@@ -107,6 +109,12 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
     private var directionsJob: Job? = null
     private var snapJob: Job? = null
 
+    private val tracker by lazy { TelemetryTracker.get(requireContext()) }
+    private fun currentUserId(): String? =
+        requireContext().getSharedPreferences("rutas_prefs", Context.MODE_PRIVATE)
+            .getLong("userId", -1L).takeIf { it > 0 }?.toString()
+    private var firstBusFixLogged = false
+
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View =
         inflater.inflate(R.layout.fragment_maps, container, false)
 
@@ -122,11 +130,47 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
         val mapFragment = childFragmentManager.findFragmentById(R.id.map) as SupportMapFragment
         mapFragment.getMapAsync(this)
 
-        btnParaderoCercano.setOnClickListener { obtenerUbicacion() }
+        view.findViewById<ImageButton>(R.id.btnDrawer)?.setOnClickListener {
+            tracker.buttonClick("MapsFragment", "btnDrawer", currentUserId(), null)
+            (activity as? MainActivity)?.toggleDrawer()
+        }
 
-        paraderoViewModel.paraderoCercano.observe(viewLifecycleOwner) { mostrarParaderoEnMapa(it) }
-        rutaViewModel.coordenadasRuta.observe(viewLifecycleOwner) { snapToRoadsYMostrarRuta(it) }
-        rutasDisponiblesViewModel.rutasDisponibles.observe(viewLifecycleOwner) { configurarDropdown(it) }
+        btnParaderoCercano.setOnClickListener {
+            val rutaSel = rutaSeleccionadaActual
+            val hasPerm = ActivityCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            tracker.buttonClick(
+                "MapsFragment", "btnParaderoCercano", currentUserId(),
+                detalles = mapOf(
+                    "hasPermission" to hasPerm,
+                    "rutaId" to (rutaSel?.id ?: -1),
+                    "rutaNombre" to (rutaSel?.nombre ?: "none")
+                )
+            )
+            obtenerUbicacion()
+        }
+
+        paraderoViewModel.paraderoCercano.observe(viewLifecycleOwner) {
+            val paraderoId = anyLongField(it, "id", "idParadero", "paraderoId")
+            tracker.buttonClick(
+                "MapsFragment", "paradero_obtenido", currentUserId(),
+                detalles = mapOf("paraderoId" to (paraderoId ?: -1), "hasParadero" to (it != null))
+            )
+            mostrarParaderoEnMapa(it)
+        }
+        rutaViewModel.coordenadasRuta.observe(viewLifecycleOwner) {
+            tracker.buttonClick(
+                "MapsFragment", "ruta_coordenadas_recibidas", currentUserId(),
+                detalles = mapOf("count" to it.size)
+            )
+            snapToRoadsYMostrarRuta(it)
+        }
+        rutasDisponiblesViewModel.rutasDisponibles.observe(viewLifecycleOwner) {
+            tracker.buttonClick(
+                "MapsFragment", "rutas_disponibles", currentUserId(),
+                detalles = mapOf("count" to it.size)
+            )
+            configurarDropdown(it)
+        }
 
         informacionViewModel.informacion.observe(viewLifecycleOwner) { informacion ->
             informacion?.let {
@@ -139,6 +183,12 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
                     "Lunes a Viernes: ${it.finServicioLunesViernes}\nSábado: ${it.finServicioSabado}\nDomingo: ${it.finServicioDomingo}"
                 view.findViewById<TextView>(R.id.txtMensaje).text = it.mensaje
                 bottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
+
+                val empId = anyLongField(rutaSeleccionadaActual?.empresa, "id", "idEmpresa", "empresaId")
+                tracker.buttonClick(
+                    "MapsFragment", "info_ruta_cargada", currentUserId(),
+                    detalles = mapOf("empresaId" to (empId ?: -1), "msgLen" to (it.mensaje?.length ?: 0))
+                )
             }
         }
 
@@ -161,16 +211,29 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
 
                     // ---- control de 10 m para ocultar marcador y ruta ----
                     if (distancia[0] <= 10f) {
+                        if (!ocultarUsuarioPorProximidad) {
+                            tracker.buttonClick(
+                                "MapsFragment", "proximity_hide", currentUserId(),
+                                detalles = mapOf("distM" to distancia[0])
+                            )
+                        }
                         ocultarUsuarioPorProximidad = true
                         ultimaRutaHastaParadero?.remove()
                         ultimaRutaHastaParadero = null
                         marcadorUsuario?.remove()
                         marcadorUsuario = null
                     } else {
+                        val wasHidden = ocultarUsuarioPorProximidad
                         ocultarUsuarioPorProximidad = false
                         if (distancia[0] > 20f) {
                             trazarRutaHastaParadero(origen, destino) // calles
                         } else {
+                            if (wasHidden) {
+                                tracker.buttonClick(
+                                    "MapsFragment", "proximity_show", currentUserId(),
+                                    detalles = mapOf("distM" to distancia[0])
+                                )
+                            }
                             ultimaRutaHastaParadero?.remove()
                             ultimaRutaHastaParadero = null
                         }
@@ -193,6 +256,7 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
                 locationCallback,
                 requireActivity().mainLooper
             )
+            tracker.buttonClick("MapsFragment", "location_updates_start", currentUserId(), null)
         }
 
         // Observa la posición del bus (PEGADO a la polilínea si está cerca)
@@ -202,6 +266,14 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
             val vel = pos.velocidad
             velocidadBusKmh = vel
             val posCruda = LatLng(lat, lng)
+
+            if (!firstBusFixLogged) {
+                firstBusFixLogged = true
+                tracker.buttonClick(
+                    "MapsFragment", "bus_first_fix", currentUserId(),
+                    detalles = mapOf("lat" to lat, "lng" to lng, "vel" to (vel ?: -1.0))
+                )
+            }
 
             var destino = posCruda
             if (rutaActualLatLngs.size >= 2) {
@@ -239,11 +311,17 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        tracker.screenView("MapsFragment", currentUserId())
+    }
+
     override fun onMapReady(map: GoogleMap) {
         googleMap = map
         googleMap.clear()
         val piuraLatLng = LatLng(-5.19449, -80.63282)
         googleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(piuraLatLng, 14f))
+        tracker.buttonClick("MapsFragment", "map_ready", currentUserId(), null)
     }
 
     private fun getScaledMarkerIcon(resourceId: Int, width: Int = 100, height: Int = 100): BitmapDescriptor? {
@@ -257,17 +335,25 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
         val ctx = context ?: return
         val rutaSel = rutaSeleccionadaActual
         if (rutaSel == null) {
+            tracker.error("MapsFragment", "btnParaderoCercano", "No hay ruta seleccionada", currentUserId())
             Toast.makeText(ctx, "Primero selecciona una ruta", Toast.LENGTH_SHORT).show()
             return
         }
         if (ActivityCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            tracker.buttonClick("MapsFragment", "request_permission_fine_location", currentUserId(), null)
             ActivityCompat.requestPermissions(requireActivity(), arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 1)
             return
         }
         fusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
             location?.let {
+                tracker.buttonClick("MapsFragment", "last_location_ok", currentUserId(), null)
                 paraderoViewModel.obtenerParaderoMasCercano(it.latitude, it.longitude, rutaSel.id)
-            } ?: run { Toast.makeText(ctx, "Ubicación no disponible", Toast.LENGTH_SHORT).show() }
+            } ?: run {
+                tracker.error("MapsFragment", "last_location_null", "Ubicación no disponible", currentUserId())
+                Toast.makeText(ctx, "Ubicación no disponible", Toast.LENGTH_SHORT).show()
+            }
+        }.addOnFailureListener {
+            tracker.error("MapsFragment", "last_location_fail", it.message ?: "error", currentUserId())
         }
     }
 
@@ -283,6 +369,11 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
             )
             googleMap.animateCamera(CameraUpdateFactory.newLatLngZoom(latLng, 17f))
             paraderoActual = it
+
+            tracker.buttonClick(
+                "MapsFragment", "paradero_marker_set", currentUserId(),
+                detalles = mapOf("lat" to it.latitud, "lng" to it.longitud)
+            )
 
             // inicia/renueva el loop de ETA
             startEtaLoop()
@@ -318,6 +409,16 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
 
             rutaActualLatLngs = emptyList() // limpiar polilínea actual
 
+            tracker.buttonClick(
+                "MapsFragment", "ruta_select", currentUserId(),
+                detalles = mapOf(
+                    "rutaId" to rutaSeleccionada.id,
+                    "rutaNombre" to rutaSeleccionada.nombre,
+                    "empresaId" to rutaSeleccionada.empresa.id,
+                    "empresaNombre" to rutaSeleccionada.empresa.nombre
+                )
+            )
+
             rutaViewModel.obtenerRuta(rutaSeleccionada.id)
             informacionViewModel.obtenerInformacion(rutaSeleccionada.empresa.id)
 
@@ -329,10 +430,12 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
             busAnimator = null
 
             if (empresaTieneGPS(rutaSeleccionada.empresa)) {
+                tracker.buttonClick("MapsFragment", "bus_tracking_start", currentUserId(), null)
                 busViewModel.start(path = "ubicacion") { msg ->
                     context?.let { Toast.makeText(it, "Firebase: $msg", Toast.LENGTH_SHORT).show() }
                 }
             } else {
+                tracker.buttonClick("MapsFragment", "bus_tracking_stop", currentUserId(), null)
                 busViewModel.stop()
             }
         }
@@ -370,6 +473,11 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
         ultimaPeticionTs = ahora
         ultimoOrigen = origen
         ultimoDestino = destino
+
+        tracker.buttonClick(
+            "MapsFragment", "directions_request", currentUserId(),
+            detalles = mapOf("mode" to mode)
+        )
 
         directionsJob?.cancel()
         directionsJob = viewLifecycleOwner.lifecycleScope.launch {
@@ -409,9 +517,11 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
             if (!isAdded || view == null) return@launch
 
             if (puntos.isNullOrEmpty()) {
+                tracker.error("MapsFragment", "directions_request", "sin_resultados", currentUserId())
                 dibujarLineaRecta(origen, destino)
                 context?.let { Toast.makeText(it, "No se pudo obtener la ruta por calles. Línea directa temporal.", Toast.LENGTH_SHORT).show() }
             } else {
+                tracker.buttonClick("MapsFragment", "directions_ok", currentUserId(), detalles = mapOf("points" to puntos.size))
                 ultimaRutaHastaParadero?.remove()
                 ultimaRutaHastaParadero = googleMap.addPolyline(
                     PolylineOptions()
@@ -537,10 +647,13 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
                 googleMap.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, 100))
             }
 
-            if (anyChunkFailed && snappedLatLngsGlobal.isNotEmpty()) {
-                context?.let { Toast.makeText(it, "Algunos tramos no se ajustaron a la vía.", Toast.LENGTH_SHORT).show() }
-            } else if (anyChunkFailed && snappedLatLngsGlobal.isEmpty()) {
+            if (snappedLatLngsGlobal.isNotEmpty()) {
+                tracker.buttonClick("MapsFragment", "snap_ok", currentUserId(), detalles = mapOf("points" to snappedLatLngsGlobal.size))
+            } else if (anyChunkFailed) {
+                tracker.error("MapsFragment", "snap_failed", "chunks_failed_and_fallback_raw", currentUserId())
                 context?.let { Toast.makeText(it, "No se pudo usar Snap to Roads; se dibujó la ruta cruda.", Toast.LENGTH_SHORT).show() }
+            } else {
+                tracker.buttonClick("MapsFragment", "snap_raw", currentUserId(), detalles = mapOf("points" to puntosParaDibujar.size))
             }
         }
     }
@@ -591,11 +704,13 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
         super.onDestroyView()
         try {
             fusedLocationClient.removeLocationUpdates(locationCallback)
+            tracker.buttonClick("MapsFragment", "location_updates_stop", currentUserId(), null)
         } catch (_: Exception) { /* no-op */ }
 
         busAnimator?.cancel()
         busAnimator = null
         busViewModel.stop()
+        tracker.buttonClick("MapsFragment", "bus_tracking_stop", currentUserId(), null)
         marcadorBusSuperStar = null
         ultimaPosBus = null
 
@@ -765,6 +880,7 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
 
     // ====== LOOP de ETA cada minuto + refrescos puntuales ======
     private fun startEtaLoop() {
+        tracker.buttonClick("MapsFragment", "eta_start", currentUserId(), null)
         actualizarEtaYUi(mostrarToast = true)
 
         etaJob?.cancel()
@@ -777,6 +893,7 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
     }
 
     private fun stopEtaLoop() {
+        tracker.buttonClick("MapsFragment", "eta_stop", currentUserId(), null)
         etaJob?.cancel()
         etaJob = null
     }
@@ -814,6 +931,11 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
             snippet = "Vel: $velStr · ETA: $etaStr · Dist: $distStr"
             showInfoWindow()
         }
+
+        tracker.buttonClick(
+            "MapsFragment", "eta_update", currentUserId(),
+            detalles = mapOf("etaSec" to etaSec, "distM" to distMetros.toInt(), "velKmh" to (vKmh ?: -1.0))
+        )
 
         if (mostrarToast) {
             context?.let { Toast.makeText(it, "ETA al paradero: $etaStr (dist: $distStr)", Toast.LENGTH_SHORT).show() }
@@ -853,5 +975,43 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
             poly.add(LatLng(latD, lngD))
         }
         return poly
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 1 && permissions.contains(Manifest.permission.ACCESS_FINE_LOCATION)) {
+            val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
+            if (granted) {
+                tracker.buttonClick("MapsFragment", "permission_granted_fine_location", currentUserId(), null)
+                if (ActivityCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                    fusedLocationClient.requestLocationUpdates(
+                        LocationRequest.create().apply {
+                            interval = 5000
+                            fastestInterval = 3000
+                            priority = Priority.PRIORITY_HIGH_ACCURACY
+                        },
+                        locationCallback,
+                        requireActivity().mainLooper
+                    )
+                    tracker.buttonClick("MapsFragment", "location_updates_start", currentUserId(), null)
+                }
+            } else {
+                tracker.error("MapsFragment", "permission_denied_fine_location", "usuario_denego", currentUserId())
+                Toast.makeText(requireContext(), "Permiso de ubicación denegado", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun anyLongField(o: Any?, vararg names: String): Long? {
+        if (o == null) return null
+        for (n in names) {
+            try {
+                val f = o.javaClass.getDeclaredField(n)
+                f.isAccessible = true
+                val v = f.get(o)
+                if (v is Number) return v.toLong()
+            } catch (_: Exception) { /* intenta el siguiente nombre */ }
+        }
+        return null
     }
 }

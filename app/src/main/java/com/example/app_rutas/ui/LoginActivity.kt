@@ -16,6 +16,7 @@ import android.os.SystemClock
 import com.example.app_rutas.application.RetrofitClient
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.example.app_rutas.infrastructure.telemetry.TelemetryTracker
 
 class LoginActivity : AppCompatActivity() {
 
@@ -25,6 +26,12 @@ class LoginActivity : AppCompatActivity() {
     private lateinit var editPassword: EditText
     private lateinit var btn_login: Button
     private val repo = UsuarioLoginRepository()
+
+    private val tracker by lazy { TelemetryTracker.get(this) }
+    private fun currentUserId(): String? =
+        getSharedPreferences("rutas_prefs", MODE_PRIVATE)
+            .getLong("userId", -1L)
+            .takeIf { it > 0 }?.toString()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -37,11 +44,24 @@ class LoginActivity : AppCompatActivity() {
         btn_login.setOnClickListener { intentarLogin() }
     }
 
+    override fun onResume() {
+        super.onResume()
+        tracker.screenView("LoginActivity", currentUserId())
+    }
+
     private fun intentarLogin() {
         val dniInput = editTextDni.text.toString().trim()
         val passInput = editPassword.text.toString()
 
+        tracker.buttonClick(
+            activity = "LoginActivity",
+            componente = "btn_login",
+            usuarioId = currentUserId(),
+            detalles = mapOf("dniLen" to dniInput.length, "hasPassword" to passInput.isNotEmpty())
+        )
+
         if (dniInput.isEmpty() || passInput.isEmpty()) {
+            tracker.error("LoginActivity", "btn_login", "Validación: campos vacíos", currentUserId())
             Toast.makeText(this, "Completa DNI y contraseña", Toast.LENGTH_SHORT).show()
             return
         }
@@ -59,17 +79,22 @@ class LoginActivity : AppCompatActivity() {
                 }
 
                 if (!abierto) {
+                    tracker.error("LoginActivity", "btn_login", "Servicio no disponible", currentUserId())
                     showError("El servicio no está disponible en este momento. Inténtalo más tarde.")
                     return@launch
                 }
 
+                val t0 = SystemClock.elapsedRealtime()
                 val users = repo.listarUsuarios()
                 val user = users.firstOrNull { it.dni.trim() == dniInput }
+                val t1 = SystemClock.elapsedRealtime()
 
                 if (user == null) {
+                    tracker.error("LoginActivity", "btn_login", "DNI no encontrado", null)
                     showError("DNI no encontrado"); clearAllFields(); return@launch
                 }
                 if (user.estado != true) {
+                    tracker.error("LoginActivity", "btn_login", "Cuenta no validada", user.id.toString())
                     showError("Tu cuenta aún no ha sido validada"); clearAllFields(); return@launch
                 }
 
@@ -78,6 +103,7 @@ class LoginActivity : AppCompatActivity() {
                     .verified
 
                 if (!ok) {
+                    tracker.error("LoginActivity", "btn_login", "Contraseña incorrecta", user.id.toString())
                     showError("Contraseña incorrecta"); clearPassword(); return@launch
                 }
 
@@ -93,7 +119,17 @@ class LoginActivity : AppCompatActivity() {
                     .putString("fotoPerfil", user.fotoPerfil)
                     .apply()
 
-                // Mantenerlo visible mínimo X ms para que se note
+                tracker.newSession()
+                tracker.buttonClick(
+                    activity = "LoginActivity",
+                    componente = "login_success",
+                    usuarioId = user.id.toString(),
+                    detalles = mapOf(
+                        "lookupMs" to (t1 - t0),
+                        "minShowMs" to 700
+                    )
+                )
+
                 val minShowMs = 700L
                 val elapsed = SystemClock.elapsedRealtime() - start
                 if (elapsed < minShowMs) delay(minShowMs - elapsed)
@@ -107,10 +143,10 @@ class LoginActivity : AppCompatActivity() {
                 )
 
             } catch (e: Exception) {
+                tracker.error("LoginActivity", "btn_login", "Excepción: ${e.message ?: "unknown"}", currentUserId())
                 showError("Error de red: ${e.message ?: "intenta nuevamente"}")
             } finally {
                 btn_login.isEnabled = true
-                // por si acaso
                 showLoading(false)
             }
         }

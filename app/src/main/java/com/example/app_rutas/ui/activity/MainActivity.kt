@@ -10,6 +10,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.GravityCompat
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.fragment.app.Fragment
+import androidx.fragment.app.FragmentManager
+import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.FragmentTransaction
 import coil.request.ImageRequest
 import okhttp3.Credentials
@@ -33,7 +35,10 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     private lateinit var drawerLayout: DrawerLayout
 
     private val tracker by lazy { TelemetryTracker.get(this) }
-    private fun currentUserId(): String? = getSharedPreferences("rutas_prefs", MODE_PRIVATE).getString("usuario_id", null)
+
+    private fun currentUserId(): String? =
+        getSharedPreferences("rutas_prefs", MODE_PRIVATE)
+            .getLong("userId", -1L).takeIf { it > 0 }?.toString()
     private var badgeText: TextView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -43,7 +48,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         val isLoggedIn = prefs.getBoolean("isLoggedIn", false)
 
         if (!isLoggedIn) {
-            //tracker.buttonClick("MainActivity", "redirectToLogin", null, detalles = mapOf("isLoggedIn" to false))
+            tracker.buttonClick("MainActivity", "redirectToLogin", currentUserId(), detalles = mapOf("isLoggedIn" to false))
             startActivity(Intent(this, LoginActivity::class.java))
             finish()
             return
@@ -91,6 +96,8 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
         if (savedInstanceState == null) {
             val open = intent.getStringExtra("open_fragment")
+            tracker.buttonClick("MainActivity", "init_fragment", currentUserId(),
+                detalles = mapOf("open_fragment" to (open ?: "default")))
             if (open == "maps") {
                 replaceFragment(MapsFragment())
                 navigationView.setCheckedItem(R.id.nav_home)
@@ -99,28 +106,51 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                 navigationView.setCheckedItem(R.id.nav_home)
             }
         }
+
+        // Log automático de SCREEN_VIEW cuando un Fragment entra a onResume()
+        supportFragmentManager.registerFragmentLifecycleCallbacks(
+            object : FragmentManager.FragmentLifecycleCallbacks() {
+                override fun onFragmentResumed(fm: FragmentManager, f: Fragment) {
+                    tracker.screenView(f::class.java.simpleName, currentUserId())
+                }
+            },
+            /* recursive = */ true
+        )
     }
 
     override fun onResume() {
         super.onResume()
-        //tracker.screenView("MainActivity", currentUserId())
+        tracker.screenView("MainActivity", currentUserId())
         refreshNotificationsBadge()
     }
 
     override fun onNavigationItemSelected(item: MenuItem): Boolean {
-        //tracker.buttonClick("MainActivity", "nav_item_click", currentUserId(), detalles = mapOf("itemId" to item.itemId, "title" to (item.title?.toString() ?: "")))
+        tracker.buttonClick(
+            "MainActivity", "nav_item_click", currentUserId(),
+            detalles = mapOf("itemId" to item.itemId, "title" to (item.title?.toString() ?: ""))
+        )
         when(item.itemId){
             R.id.nav_home -> replaceFragment(MapsFragment())
             R.id.nav_planificador -> replaceFragment(RutaPlanificadaFragment())
             R.id.nav_contacto -> replaceFragment(ContactFragment())
             R.id.nav_notifications -> replaceFragment(NotificationsFragment())
             R.id.nav_logout -> {
-                androidx.appcompat.app.AlertDialog.Builder(this)
+                val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
                     .setTitle("Cerrar sesión")
                     .setMessage("¿Estas seguro de cerrar sesión?")
-                    .setPositiveButton("Sí") { _, _ -> logout() }
-                    .setNegativeButton("Cancelar", null)
-                    .show()
+                    .setPositiveButton("Sí") { _, _ ->
+                        tracker.buttonClick("MainActivity", "logout_confirmed", currentUserId(), null)
+                        logout()
+                    }
+                    .setNegativeButton("Cancelar") { _, _ ->
+                        tracker.buttonClick("MainActivity", "logout_cancelled", currentUserId(), null)
+                    }
+                    .create()
+
+                dialog.setOnShowListener {
+                    tracker.buttonClick("MainActivity", "logout_dialog_show", currentUserId(), null)
+                }
+                dialog.show()
             }
         }
         drawerLayout.closeDrawer(GravityCompat.START)
@@ -131,13 +161,12 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         val transaction: FragmentTransaction = supportFragmentManager.beginTransaction()
         transaction.replace(R.id.fragment_container,fragment)
         transaction.commit()
-
-        //tracker.screenView(fragment::class.java.simpleName, currentUserId())
+        tracker.screenView(fragment::class.java.simpleName, currentUserId())
     }
 
     override fun onBackPressed() {
         val drawerWasOpen = drawerLayout.isDrawerOpen(GravityCompat.START)
-        //tracker.buttonClick("MainActivity", "back_pressed", currentUserId(), detalles = mapOf("drawerOpen" to drawerWasOpen))
+        tracker.buttonClick("MainActivity", "back_pressed", currentUserId(), detalles = mapOf("drawerOpen" to drawerWasOpen))
         super.onBackPressed()
         if(drawerLayout.isDrawerOpen(GravityCompat.START)){
             drawerLayout.closeDrawer(GravityCompat.START)
@@ -179,6 +208,10 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                 val repo = NotificationsRepository()
                 val list = repo.listForUserIncludingGlobal(dni)
                 val unread = list.count { it.isRead == false && (dni != null && it.userId == dni) }
+                tracker.buttonClick(
+                    "MainActivity", "notifications_badge_refresh", currentUserId(),
+                    detalles = mapOf("unread" to unread, "hasDni" to (dni != null))
+                )
                 if (unread > 0) {
                     badgeText?.text = if (unread > 99) "99+" else unread.toString()
                     badgeText?.visibility = View.VISIBLE
@@ -186,16 +219,18 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                     badgeText?.visibility = View.GONE
                 }
             } catch (_: Exception) {
+                tracker.error("MainActivity", "notifications_badge_refresh", "fetch_error", currentUserId())
                 badgeText?.visibility = View.GONE
             }
         }
     }
 
-
     fun toggleDrawer() {
         if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
+            tracker.buttonClick("MainActivity", "drawer_toggle", currentUserId(), detalles = mapOf("action" to "close"))
             drawerLayout.closeDrawer(GravityCompat.START)
         } else {
+            tracker.buttonClick("MainActivity", "drawer_toggle", currentUserId(), detalles = mapOf("action" to "close"))
             drawerLayout.openDrawer(GravityCompat.START)
         }
     }

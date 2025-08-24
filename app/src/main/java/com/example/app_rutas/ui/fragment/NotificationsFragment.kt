@@ -19,6 +19,7 @@ import com.example.app_rutas.ui.adapters.NotificationsAdapter
 import com.example.app_rutas.ui.notifications.NotificationDetailBottomSheet
 import kotlinx.coroutines.launch
 import android.widget.ImageButton
+import com.example.app_rutas.infrastructure.telemetry.TelemetryTracker
 
 class NotificationsFragment : Fragment() {
 
@@ -28,6 +29,11 @@ class NotificationsFragment : Fragment() {
 
     private val adapter = NotificationsAdapter()
     private val repo = NotificationsRepository()
+
+    private val tracker by lazy { TelemetryTracker.get(requireContext()) }
+    private fun currentUserId(): String? =
+        requireContext().getSharedPreferences("rutas_prefs", Context.MODE_PRIVATE)
+            .getLong("userId", -1L).takeIf { it > 0 }?.toString()
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         val v = inflater.inflate(R.layout.fragment_notifications, container, false)
@@ -43,19 +49,26 @@ class NotificationsFragment : Fragment() {
         rv.layoutManager = LinearLayoutManager(requireContext())
         rv.adapter = adapter
 
-        // Abrir detalle
         adapter.onItemClick = { n ->
+            tracker.buttonClick(
+                "NotificationsFragment", "item_click", currentUserId(),
+                detalles = mapOf("notifId" to (n.id ?: "null"), "isRead" to (n.isRead == true))
+            )
             NotificationDetailBottomSheet.newInstance(n)
                 .show(childFragmentManager, "notifDetail")
         }
 
-        swipe.setOnRefreshListener { loadData(markAsReadAfterLoad = false) }
+        swipe.setOnRefreshListener {
+            tracker.buttonClick("NotificationsFragment", "swipe_refresh", currentUserId(), null)
+            loadData(markAsReadAfterLoad = false)
+        }
         return v
     }
 
     override fun onResume() {
         super.onResume()
-        loadData(markAsReadAfterLoad = true) // si quieres que se marquen como leídas al entrar
+        tracker.screenView("NotificationsFragment", currentUserId())
+        loadData(markAsReadAfterLoad = true)
     }
 
     private fun loadData(markAsReadAfterLoad: Boolean) {
@@ -68,15 +81,28 @@ class NotificationsFragment : Fragment() {
                 adapter.submit(list)
                 tvEmpty.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
 
+                val unread = list.count { it.isRead == false && (dni != null && it.userId == dni) }
+                tracker.buttonClick(
+                    "NotificationsFragment", "load_success", currentUserId(),
+                    detalles = mapOf("total" to list.size, "unread" to unread, "markAfterLoad" to markAsReadAfterLoad)
+                )
+
                 (activity as? MainActivity)?.refreshNotificationsBadge()
 
-                if (markAsReadAfterLoad && !dni.isNullOrBlank() && list.any { it.isRead == false && it.userId == dni }) {
+                if (markAsReadAfterLoad && !dni.isNullOrBlank() && unread > 0) {
                     try {
                         repo.markAllRead(dni)
+                        tracker.buttonClick(
+                            "NotificationsFragment", "mark_all_read", currentUserId(),
+                            detalles = mapOf("unreadBefore" to unread)
+                        )
                         (activity as? MainActivity)?.refreshNotificationsBadge()
-                    } catch (_: Exception) { }
+                    } catch (e: Exception) {
+                        tracker.error("NotificationsFragment", "mark_all_read", e.message ?: "error", currentUserId())
+                    }
                 }
             } catch (e: Exception) {
+                tracker.error("NotificationsFragment", "load_error", e.message ?: "error", currentUserId())
                 Toast.makeText(requireContext(), "Error al cargar notificaciones", Toast.LENGTH_SHORT).show()
             } finally {
                 swipe.isRefreshing = false
