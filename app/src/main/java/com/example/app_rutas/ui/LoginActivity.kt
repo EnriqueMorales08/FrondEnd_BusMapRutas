@@ -13,6 +13,7 @@ import com.example.app_rutas.infrastructure.repositories.UsuarioLoginRepository
 import com.example.app_rutas.ui.common.LoadingDialogFragment
 import com.example.app_rutas.ui.activity.MainActivity
 import android.os.SystemClock
+import com.example.app_rutas.application.RetrofitClient
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -50,6 +51,18 @@ class LoginActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             try {
+                val abierto = try {
+                    val resp = RetrofitClient.adminApi.getEstadoServicio()
+                    resp.abierto
+                } catch (e: Exception) {
+                    false
+                }
+
+                if (!abierto) {
+                    showError("El servicio no está disponible en este momento. Inténtalo más tarde.")
+                    return@launch
+                }
+
                 val users = repo.listarUsuarios()
                 val user = users.firstOrNull { it.dni.trim() == dniInput }
 

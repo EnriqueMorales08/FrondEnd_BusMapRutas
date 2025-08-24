@@ -2,6 +2,7 @@ package com.example.app_rutas.application
 
 import com.example.app_rutas.domain.services.UsuarioApi
 import com.example.app_rutas.domain.services.NotificationsApi
+import com.example.app_rutas.domain.services.AdminApi
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -48,5 +49,14 @@ object RetrofitClient {
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(NotificationsApi::class.java)
+    }
+
+    val adminApi: AdminApi by lazy {
+        Retrofit.Builder()
+            .baseUrl(BASE_URL_NOTIF) // http://137.184.200.155:8080/api/
+            .client(okHttp)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(AdminApi::class.java)
     }
 }

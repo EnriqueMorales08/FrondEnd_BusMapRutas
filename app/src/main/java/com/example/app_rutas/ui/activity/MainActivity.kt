@@ -11,7 +11,9 @@ import androidx.core.view.GravityCompat
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentTransaction
-import coil.load
+import coil.request.ImageRequest
+import okhttp3.Credentials
+import coil.imageLoader
 import coil.transform.CircleCropTransformation
 import com.example.app_rutas.R
 import com.example.app_rutas.ui.LoginActivity
@@ -65,12 +67,20 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         tvNombre.text = nombre
         tvCorreo.text = correo
 
-        ivAvatar.load(foto) {
-            crossfade(true)
-            placeholder(R.drawable.ic_avatar_placeholder)
-            error(R.drawable.ic_avatar_placeholder)
-            transformations(CircleCropTransformation())
-        }
+        val request = ImageRequest.Builder(this)
+            .data(foto)
+            .crossfade(true)
+            .placeholder(R.drawable.ic_avatar_placeholder)
+            .error(R.drawable.ic_avatar_placeholder)
+            .transformations(CircleCropTransformation())
+            .addHeader(
+                "Authorization",
+                Credentials.basic("gustavo", "busmappiura")
+            )
+            .target(ivAvatar)
+            .build()
+
+        ivAvatar.context.imageLoader.enqueue(request)
 
         val toggle = ActionBarDrawerToggle(this, drawerLayout, R.string.open, R.string.close)
         drawerLayout.addDrawerListener(toggle)
