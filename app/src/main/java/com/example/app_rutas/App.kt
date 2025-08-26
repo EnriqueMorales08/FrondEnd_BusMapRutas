@@ -11,10 +11,8 @@ class App : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        // Envío periódico cada 1 hora
-        //FlushTelemetryWorker.enqueuePeriodicHourly(this)
-        // Primer flush inmediato (opcional)
-        //FlushTelemetryWorker.enqueueOneShot(this)
+        FlushTelemetryWorker.enqueuePeriodicHourly(this)
+        FlushTelemetryWorker.enqueueOneShot(this)
         instance = this
     }
 }

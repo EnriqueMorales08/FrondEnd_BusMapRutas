@@ -1,6 +1,7 @@
 package com.example.app_rutas.ui.fragment
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -14,7 +15,9 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.example.app_rutas.R
 import com.example.app_rutas.infrastructure.repositories.RutaRepositoryImpl
+import com.example.app_rutas.infrastructure.telemetry.TelemetryTracker
 import com.example.app_rutas.model.RutaCompleta
+import com.example.app_rutas.ui.activity.MainActivity
 import com.example.app_rutas.ui.adapters.PlacesAutoCompleteAdapter
 import com.google.android.gms.location.*
 import com.google.android.gms.maps.*
@@ -84,11 +87,15 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
     private val cacheDistancia = mutableMapOf<String, Double>()
     private val cacheSnap = mutableMapOf<String, List<LatLng>>()
 
+    // NUEVO: caché de rutas caminando (Directions)
+    private val cacheWalking = mutableMapOf<String, List<LatLng>>()
+
     // Patrón punteado para “a pie”
     private val walkPattern: List<PatternItem> = listOf(Dash(20f), Gap(15f))
 
     // -------------------- Flags de prueba --------------------
     // Usa sólo Haversine (sin Distance Matrix ni Roads) para garantizar que pinte.
+    // NOTA: Este flag NO afecta al trazado peatonal; a pie siempre intenta por calles reales (Directions).
     private val USE_ONLY_HAVERSINE = true
 
     // Simular tu ubicación para pruebas
@@ -100,8 +107,20 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
     private var leyendaBaseChildren = 0
     private var leyendaInicialAgregada = true // si el XML ya tiene título, déjalo así
 
+    private val tracker by lazy { TelemetryTracker.get(requireContext()) }
+    private fun currentUserId(): String? =
+        requireContext().getSharedPreferences("rutas_prefs", Context.MODE_PRIVATE)
+            .getLong("userId", -1L).takeIf { it > 0 }?.toString()
+
+
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         val view = inflater.inflate(R.layout.fragment_ruta_planificada, container, false)
+
+        view.findViewById<ImageButton>(R.id.btnMenu).setOnClickListener {
+            tracker.buttonClick("RutaPlanificadaFragment", "btnMenu", currentUserId())
+            (activity as? MainActivity)?.toggleDrawer()
+        }
+
         etDestino = view.findViewById(R.id.etDestino)
         mapView = view.findViewById(R.id.mapView)
         leyendaContainer = view.findViewById(R.id.leyendaContainer)
@@ -121,6 +140,12 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
         etDestino.setOnItemClickListener { _, _, position, _ ->
             val item = adapter.getItem(position)
             val placeId = item?.placeId ?: return@setOnItemClickListener
+            tracker.buttonClick(
+                "RutaPlanificadaFragment",
+                "etDestino_select",
+                currentUserId(),
+                detalles = mapOf("placeId" to placeId)
+            )
             val request = FetchPlaceRequest.builder(placeId, listOf(Place.Field.LAT_LNG)).build()
             placesClient.fetchPlace(request)
                 .addOnSuccessListener { response ->
@@ -132,7 +157,13 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
                         }
                     }
                 }
-                .addOnFailureListener {
+                .addOnFailureListener { e ->
+                    tracker.error(
+                        "RutaPlanificadaFragment",
+                        "fetchPlace",
+                        e.message ?: "No se pudo obtener ubicación del lugar",
+                        currentUserId()
+                    )
                     Toast.makeText(requireContext(), "No se pudo obtener ubicación del lugar", Toast.LENGTH_SHORT).show()
                 }
         }
@@ -255,13 +286,13 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
 
         val origenLatLng = ultimaUbicacion?.let { LatLng(it.latitude, it.longitude) }
         if (origenLatLng == null) {
-            Toast.makeText(requireContext(), "No tengo tu ubicación aún.", Toast.LENGTH_LONG).show()
+            Toast.makeText(requireContext(), "Ubicación no disponible aún.", Toast.LENGTH_LONG).show()
             mostrarMarcadorDestino(destino)
             return@withContext
         }
 
         val rutas = withContext(Dispatchers.IO) { rutaRepository.obtenerRutasCompletas() }
-        Toast.makeText(requireContext(), "rutas=${rutas.size}", Toast.LENGTH_SHORT).show()
+        Toast.makeText(requireContext(), "Rutas=${rutas.size}", Toast.LENGTH_SHORT).show()
 
         // ---- DIRECTA ----
         val rutasDirectas = withContext(Dispatchers.IO) {
@@ -269,7 +300,7 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
                 rutaCercaDePuntoPorCalle(r, origenLatLng) && rutaCercaDePuntoPorCalle(r, destino)
             }
         }
-        Toast.makeText(requireContext(), "directas=${rutasDirectas.size}", Toast.LENGTH_SHORT).show()
+        Toast.makeText(requireContext(), "Directas=${rutasDirectas.size}", Toast.LENGTH_SHORT).show()
 
         if (rutasDirectas.isNotEmpty()) {
             val r = rutasDirectas.first()
@@ -284,6 +315,7 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
             agregarALeyenda(r.nombre, r.empresa.nombre, colorInt)
             pintarParaderosRuta(r, hue)
 
+            // NUEVO: trazo a pie por calles reales (suspend)
             dibujarCaminoAPie(origenLatLng, ptO)
             dibujarCaminoAPie(ptD, destino)
 
@@ -345,6 +377,7 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
                 dibujarTramoSnap(tramoA, col1); agregarALeyenda(r1.nombre, r1.empresa.nombre, col1); pintarParaderosRuta(r1, hue1)
                 dibujarTramoSnap(tramoB, col2); agregarALeyenda(r2.nombre, r2.empresa.nombre, col2); pintarParaderosRuta(r2, hue2)
 
+                // NUEVO: tramos a pie por calles reales (suspend)
                 dibujarCaminoAPie(origenLatLng, listA[idxA])
                 dibujarCaminoAPie(listA[idxTA], ptTrans)
                 dibujarCaminoAPie(ptTrans, listB[idxTB])
@@ -461,16 +494,23 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
         }
     }
 
-    private fun dibujarCaminoAPie(a: LatLng, b: LatLng) {
-        polylines.add(
-            googleMap.addPolyline(
-                PolylineOptions()
-                    .add(a, b)
-                    .width(6f)
-                    .pattern(walkPattern)
-                    .color(Color.DKGRAY)
+    // ====== NUEVO: ruta a pie por calles reales (Directions) ======
+    private suspend fun dibujarCaminoAPie(a: LatLng, b: LatLng) {
+        // Intentar con Directions (calles reales)
+        val ruta = walkingRoutePointsViaDirections(a, b)
+
+        val puntos = if (ruta.isNotEmpty()) ruta else listOf(a, b) // fallback recto si falla
+        withContext(Dispatchers.Main) {
+            polylines.add(
+                googleMap.addPolyline(
+                    PolylineOptions()
+                        .addAll(puntos)
+                        .width(6f)
+                        .pattern(walkPattern)   // mantiene punteado
+                        .color(Color.DKGRAY)
+                )
             )
-        )
+        }
     }
 
     private fun pintarParaderosRuta(ruta: RutaCompleta, colorHue: Float) {
@@ -516,7 +556,8 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
                     cacheDistancia[key] = value
                     return@use value
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                tracker.error("RutaPlanificadaFragment", "distance_matrix", e.message ?: "error distancia", currentUserId())
                 Double.MAX_VALUE
             }
         }
@@ -540,9 +581,84 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
                     return@use out
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            tracker.error("RutaPlanificadaFragment", "roads_snap", e.message ?: "error roads", currentUserId())
             emptyList()
         }
+    }
+
+    // ====== NUEVO: Directions API (walking polyline) y helpers ======
+    private fun dirKey(a: LatLng, b: LatLng) = "walk:${a.latitude},${a.longitude}|${b.latitude},${b.longitude}"
+
+    private suspend fun walkingRoutePointsViaDirections(a: LatLng, b: LatLng): List<LatLng> =
+        withContext(Dispatchers.IO) {
+            val key = dirKey(a, b)
+            cacheWalking[key]?.let { return@withContext it }
+
+            val url = ("https://maps.googleapis.com/maps/api/directions/json" +
+                    "?origin=${a.latitude},${a.longitude}" +
+                    "&destination=${b.latitude},${b.longitude}" +
+                    "&mode=walking&key=$apiKey")
+
+            return@withContext try {
+                val req = Request.Builder().url(url).build()
+                networkGate.withPermit {
+                    http.newCall(req).execute().use { resp ->
+                        if (!resp.isSuccessful) return@use emptyList<LatLng>()
+                        val body = resp.body?.string() ?: return@use emptyList<LatLng>()
+                        val json = JSONObject(body)
+                        val status = json.optString("status", "ZERO_RESULTS")
+                        if (status != "OK") return@use emptyList<LatLng>()
+
+                        val routes = json.optJSONArray("routes") ?: return@use emptyList<LatLng>()
+                        if (routes.length() == 0) return@use emptyList<LatLng>()
+                        val overview = routes.getJSONObject(0).getJSONObject("overview_polyline")
+                        val encoded = overview.getString("points")
+                        val decoded = decodePolyline(encoded)
+                        cacheWalking[key] = decoded
+                        decoded
+                    }
+                }
+            } catch (e: Exception) {
+                tracker.error("RutaPlanificadaFragment", "directions", e.message ?: "error directions", currentUserId())
+                emptyList()
+            }
+        }
+
+    private fun decodePolyline(encoded: String): List<LatLng> {
+        val poly = ArrayList<LatLng>()
+        var index = 0
+        val len = encoded.length
+        var lat = 0
+        var lng = 0
+
+        while (index < len) {
+            var b: Int
+            var shift = 0
+            var result = 0
+            do {
+                b = encoded[index++].code - 63
+                result = result or ((b and 0x1f) shl shift)
+                shift += 5
+            } while (b >= 0x20)
+            val dlat = if ((result and 1) != 0) (result shr 1).inv() else (result shr 1)
+            lat += dlat
+
+            shift = 0
+            result = 0
+            do {
+                b = encoded[index++].code - 63
+                result = result or ((b and 0x1f) shl shift)
+                shift += 5
+            } while (b >= 0x20)
+            val dlng = if ((result and 1) != 0) (result shr 1).inv() else (result shr 1)
+            lng += dlng
+
+            val latD = lat / 1E5
+            val lngD = lng / 1E5
+            poly.add(LatLng(latD, lngD))
+        }
+        return poly
     }
 
     // -------------------- Geo helpers --------------------
@@ -653,6 +769,7 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
     override fun onResume() {
         super.onResume()
         mapView.onResume()
+        tracker.screenView("RutaPlanificadaFragment", currentUserId())
         if (mapReady) habilitarMiUbicacionEnMapaSiPermiso()
     }
 
@@ -680,6 +797,7 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
             if (grantResults.isNotEmpty() && grantResults.any { it == PackageManager.PERMISSION_GRANTED }) {
                 if (mapReady) habilitarMiUbicacionEnMapaSiPermiso()
             } else {
+                tracker.error("RutaPlanificadaFragment", "location_permission", "denegado", currentUserId())
                 Toast.makeText(requireContext(), "Permisos de ubicación denegados", Toast.LENGTH_LONG).show()
             }
         }
