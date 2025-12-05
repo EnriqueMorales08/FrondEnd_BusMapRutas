@@ -99,7 +99,7 @@ class RutaPlanificadaFragment : Fragment(), OnMapReadyCallback {
     private val USE_ONLY_HAVERSINE = true
 
     // Simular tu ubicación para pruebas
-    private val USE_SIMULATED_LOCATION = false
+    private val USE_SIMULATED_LOCATION = true
     private val SIM_LAT = -5.174843185366898
     private val SIM_LNG =  -80.69098676969931
 

@@ -10,9 +10,9 @@ import java.util.concurrent.TimeUnit
 
 object RetrofitClient {
 
-    private const val BASE_URL = "http://137.184.200.155/api/"
-    private const val BASE_URL_LOGIN = "http://137.184.200.155:9090/api/"
-    private const val BASE_URL_NOTIF     = "http://137.184.200.155:8080/api/"
+    private const val BASE_URL = "http://143.198.176.30:9004/api/"
+    private const val BASE_URL_LOGIN = "http://143.198.176.30:9003/api/"
+    private const val BASE_URL_NOTIF     = "http://143.198.176.30:9004/api/"
 
     //Registro
     private val okHttp = OkHttpClient.Builder()
@@ -53,7 +53,7 @@ object RetrofitClient {
 
     val adminApi: AdminApi by lazy {
         Retrofit.Builder()
-            .baseUrl(BASE_URL_NOTIF) // http://137.184.200.155:8080/api/
+            .baseUrl(BASE_URL_NOTIF)
             .client(okHttp)
             .addConverterFactory(GsonConverterFactory.create())
             .build()

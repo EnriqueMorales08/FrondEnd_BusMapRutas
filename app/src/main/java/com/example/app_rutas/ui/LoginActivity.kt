@@ -25,6 +25,7 @@ class LoginActivity : AppCompatActivity() {
     private lateinit var editTextDni: EditText
     private lateinit var editPassword: EditText
     private lateinit var btn_login: Button
+    private lateinit var btn_go_register: Button
     private val repo = UsuarioLoginRepository()
 
     private val tracker by lazy { TelemetryTracker.get(this) }
@@ -40,8 +41,21 @@ class LoginActivity : AppCompatActivity() {
         editTextDni = findViewById(R.id.editTextDni)
         editPassword = findViewById(R.id.editPassword)
         btn_login = findViewById(R.id.btn_login)
+        btn_go_register = findViewById(R.id.btn_go_register)
 
         btn_login.setOnClickListener { intentarLogin() }
+
+        btn_go_register.setOnClickListener {
+            tracker.buttonClick(
+                activity = "LoginActivity",
+                componente = "btn_go_register",
+                usuarioId = currentUserId(),
+                detalles = mapOf("action" to "open_register")
+            )
+
+            val intent = Intent(this@LoginActivity, RegisterActivity::class.java)
+            startActivity(intent)
+        }
     }
 
     override fun onResume() {

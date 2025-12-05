@@ -1,39 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:orientation="vertical"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <LinearLayout
-        android:id="@+id/topRow"
+    <ImageButton
+        android:id="@+id/btnMenu"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:background="@drawable/bg_round_orange"
+        android:padding="8dp"
+        android:src="@drawable/ic_menu_24"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"/>
+
+    <AutoCompleteTextView
+        android:id="@+id/etDestino"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:padding="16dp">
-
-        <ImageButton
-            android:id="@+id/btnMenu"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:background="@drawable/bg_round_orange"
-            android:backgroundTint="@null"
-            android:foreground="?attr/selectableItemBackgroundBorderless"
-            android:padding="12dp"
-            android:src="@drawable/ic_menu_24"/>
-
-        <AutoCompleteTextView
-            android:id="@+id/etDestino"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="12dp"
-            android:layout_weight="1"
-            android:hint="Ingresa tu destino"
-            android:inputType="text"
-            android:padding="12dp"
-            android:background="@drawable/rounded_edittext"
-            android:dropDownHeight="200dp"/>
-    </LinearLayout>
+        android:hint="Ingresa tu destino"
+        android:inputType="text"
+        android:padding="12dp"
+        android:background="@drawable/rounded_edittext"
+        android:dropDownHeight="200dp"/>
 
     <com.google.android.gms.maps.MapView
         android:id="@+id/mapView"
@@ -52,5 +42,6 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:padding="12dp"/>
+
     </ScrollView>
 </LinearLayout>

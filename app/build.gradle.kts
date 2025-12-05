@@ -6,7 +6,6 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
-
 android {
     namespace = "com.example.app_rutas"
     compileSdk = 36
@@ -17,19 +16,40 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
-
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        create("release") {
+            // Estas 4 propiedades deben existir en gradle.properties
+            storeFile = file(providers.gradleProperty("MYAPP_UPLOAD_STORE_FILE").get())
+            storePassword = providers.gradleProperty("MYAPP_UPLOAD_STORE_PASSWORD").get()
+            keyAlias = providers.gradleProperty("MYAPP_UPLOAD_KEY_ALIAS").get()
+            keyPassword = providers.gradleProperty("MYAPP_UPLOAD_KEY_PASSWORD").get()
+        }
     }
 
     buildTypes {
         release {
+            signingConfig = signingConfigs.getByName("release")
+
             isMinifyEnabled = false
+            isShrinkResources = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
         }
+        debug {
+        }
     }
+
+    splits {
+        abi {
+            isEnable = false
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
@@ -40,8 +60,6 @@ android {
 }
 
 dependencies {
-
-
     implementation(libs.play.services.maps.v1810)
     implementation(libs.okhttp)
     implementation(libs.material.v1110)
@@ -51,16 +69,13 @@ dependencies {
     implementation(libs.google.android.maps.utils)
     implementation(libs.retrofit)
     implementation(libs.places)
-
-    //implementation ("com.google.android.gms:play-services-tasks:18.0.2")
-
-    implementation (libs.converter.gson)
-    implementation (libs.logging.interceptor)
+    implementation(libs.converter.gson)
+    implementation(libs.logging.interceptor)
     implementation(libs.firebase.auth.ktx)
     implementation(libs.firebase.database.ktx)
-    implementation (libs.firebase.storage)
-    implementation (libs.androidx.lifecycle.viewmodel.ktx)
-    implementation (libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.firebase.storage)
+    implementation(libs.androidx.lifecycle.viewmodel.ktx)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
@@ -74,7 +89,6 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso.core)
     implementation(libs.play.services.location)
     implementation(libs.androidx.fragment.ktx)
-
     implementation(libs.converter.moshi)
     implementation(libs.moshi)
     implementation(libs.moshi.kotlin)
@@ -84,7 +98,6 @@ dependencies {
     implementation(libs.bcrypt)
     implementation(libs.coil)
     ksp(libs.room.compiler)
-
     implementation(libs.androidx.recyclerview)
     implementation(libs.androidx.swiperefreshlayout)
     implementation(libs.androidx.lifecycle.livedata.ktx)

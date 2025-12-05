@@ -12,7 +12,7 @@ import org.json.JSONObject
 class ParaderoRepositoryImpl : ParaderoRepository {
 
     private val client = OkHttpClient()
-    private val backendUrl = "http://137.184.200.155:9090/api/paraderos/cercano"
+    private val backendUrl = "http://143.198.176.30:9003/api/paraderos/cercano"
 
     override suspend fun obtenerParaderoCercano(lat: Double, lng: Double, rutaId: Long): Paradero? = withContext(Dispatchers.IO) {
         val url = "$backendUrl?lat=$lat&lng=$lng&rutaId=$rutaId"

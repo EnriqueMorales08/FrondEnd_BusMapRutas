@@ -11,8 +11,8 @@ class App : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        FlushTelemetryWorker.enqueuePeriodicHourly(this)
-        FlushTelemetryWorker.enqueueOneShot(this)
+        //FlushTelemetryWorker.enqueuePeriodicHourly(this)
+        //FlushTelemetryWorker.enqueueOneShot(this)
         instance = this
     }
 }

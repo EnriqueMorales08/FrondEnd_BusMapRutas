@@ -2,6 +2,7 @@ package com.example.app_rutas.ui
 
 import android.content.ContentResolver
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.app_rutas.domain.entities.UsuarioResponse
@@ -42,9 +43,20 @@ class RegisterViewModel(
                 if (resp.isSuccessful && resp.body() != null) {
                     _resultado.value = Result.success(resp.body()!!)
                 } else {
-                    _resultado.value = Result.failure(
-                        RuntimeException("HTTP ${resp.code()} - ${resp.errorBody()?.string()}")
-                    )
+                    val errorBody = resp.errorBody()?.string()
+                    Log.e(
+                        "RegisterViewModel",
+                        """
+                    Error al registrar usuario.
+                    HTTP ${resp.code()} - ${resp.message()}
+                    url = ${resp.raw().request.url}
+                    body = $errorBody
+                    """.trimIndent()
+                                )
+
+                                _resultado.value = Result.failure(
+                                    RuntimeException("HTTP ${resp.code()} - $errorBody")
+                                )
                 }
             } catch (e: Exception) {
                 _resultado.value = Result.failure(e)

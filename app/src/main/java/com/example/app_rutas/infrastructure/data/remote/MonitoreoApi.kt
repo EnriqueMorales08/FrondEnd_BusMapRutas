@@ -20,7 +20,7 @@ interface MonitoreoApi {
     suspend fun batch(@Body dtos: List<MonitoreoEventoDTO>): Response<BaseResponse<CountData>>
 
     companion object {
-        private const val BASE = "http://137.184.200.155:9090/api/"
+        private const val BASE = "http://143.198.176.30:9003/api/"
 
         fun create(context: Context): MonitoreoApi {
             val appVersion = try {
